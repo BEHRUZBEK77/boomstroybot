@@ -1,11 +1,12 @@
 const { getSession, setSession, getCart, clearCart, getCartTotal } = require('../services/session');
-const { addDoc, updateDoc, queryDocs, addLog } = require('../services/firebase');
-const { checkDelivery } = require('../services/delivery');
+const { addDoc, updateDoc, queryDocs, getCollection, addLog } = require('../services/firebase');
+const { checkDelivery, WAREHOUSE } = require('../services/delivery');
 const { fmtNum, fmtDate, generateOrderNumber, orderStatusLabel } = require('../utils/helpers');
 const {
-  sendLocationButton, paymentChoice, confirmOrder,
-  mainMenu, cancelButton,
+  paymentChoice, confirmOrder, mainMenu, receiveTypeChoice,
+  pickupWarehouseButtons, addressRetryButtons, sendLocationButton, cancelButton,
 } = require('../utils/keyboards');
+const { t, langOf } = require('../utils/i18n');
 const { Markup } = require('telegraf');
 const { buildCartSummary } = require('./cart');
 
@@ -14,183 +15,217 @@ const ADMIN_GROUP = process.env.ADMIN_GROUP_ID;
 const CARD_NUMBER = process.env.CARD_NUMBER || '8600000000000000';
 const CARD_OWNER = process.env.CARD_OWNER || 'BoomStroy LLC';
 
-// ─── STEP 1: Buyurtmani boshlash ─────────────────────────────────────────────
+function payLabel(lang, payType, isPickup) {
+  if (payType === 'card') return t(lang, 'payCard');
+  return isPickup ? t(lang, 'payCashPickup') : t(lang, 'payCash');
+}
+
+// ─── STEP 1: Buyurtmani boshlash → olish turini tanlash ──────────────────────
 async function handleOrderStart(ctx) {
+  const lang = langOf(ctx);
   if (ctx.callbackQuery) await ctx.answerCbQuery();
 
   const cart = getCart(ctx.from.id);
   if (!cart.length) {
-    const msg = '🛒 Savat bo\'sh! Avval mahsulot tanlang.';
-    if (ctx.callbackQuery) return ctx.editMessageText(msg);
+    const msg = t(lang, 'cartEmptyFirst');
+    if (ctx.callbackQuery) { try { return ctx.editMessageText(msg); } catch { return ctx.reply(msg); } }
     return ctx.reply(msg);
   }
 
   const total = getCartTotal(ctx.from.id);
-  const summary = buildCartSummary(cart);
-
-  // Inline tugmalar: joylashuv yuborish YOKI matn yozish
-  const kb = Markup.inlineKeyboard([
-    [Markup.button.callback('📍 Joylashuvimni yuborish', 'send_location')],
-    [Markup.button.callback('✍️ Manzilni qo\'lda yozish', 'type_address')],
-    [Markup.button.callback('❌ Bekor qilish', 'cancel_order')],
-  ]);
-
-  const text =
-    `${summary}\n\n` +
-    `📍 *Yetkazib berish manzilini tanlang:*\n\n` +
-    `📍 Joylashuvingizni yuboring *(aniqroq)*\n` +
-    `✍️ Yoki manzilni qo'lda yozing\n\n` +
-    `⚠️ _Bo'ka tumani va 50 km dan uzoqqa yetkazib berilmaydi!_`;
-
   setSession(ctx.from.id, { orderTotal: total });
 
+  const text = t(lang, 'chooseReceiveType', { summary: buildCartSummary(cart, lang) });
   if (ctx.callbackQuery) {
-    try {
-      return await ctx.editMessageText(text, { parse_mode: 'Markdown', ...kb });
-    } catch {
-      return await ctx.reply(text, { parse_mode: 'Markdown', ...kb });
-    }
+    try { return await ctx.editMessageText(text, { parse_mode: 'Markdown', ...receiveTypeChoice(lang) }); }
+    catch { return await ctx.reply(text, { parse_mode: 'Markdown', ...receiveTypeChoice(lang) }); }
   }
-  return await ctx.reply(text, { parse_mode: 'Markdown', ...kb });
+  return await ctx.reply(text, { parse_mode: 'Markdown', ...receiveTypeChoice(lang) });
+}
+
+// ─── STEP 1a: Yetkazib berish tanlandi → manzil so'rash ──────────────────────
+async function handleReceiveDelivery(ctx) {
+  const lang = langOf(ctx);
+  await ctx.answerCbQuery();
+  setSession(ctx.from.id, { deliveryType: 'delivery' });
+
+  const kb = Markup.inlineKeyboard([
+    [Markup.button.callback(t(lang, 'btnSendLocation'), 'send_location')],
+    [Markup.button.callback(t(lang, 'btnTypeAddress'), 'type_address')],
+    [Markup.button.callback(t(lang, 'cancel'), 'cancel_order')],
+  ]);
+  try {
+    return await ctx.editMessageText(t(lang, 'chooseAddress'), { parse_mode: 'Markdown', ...kb });
+  } catch {
+    return await ctx.reply(t(lang, 'chooseAddress'), { parse_mode: 'Markdown', ...kb });
+  }
+}
+
+// ─── STEP 1b: Borib olish tanlandi → ombor tanlash ───────────────────────────
+async function handlePickupStart(ctx) {
+  const lang = langOf(ctx);
+  await ctx.answerCbQuery();
+
+  const warehouses = await getPickupWarehouses();
+  if (!warehouses.length) {
+    return ctx.editMessageText(t(lang, 'pickupNoWarehouses'), receiveTypeChoice(lang));
+  }
+  setSession(ctx.from.id, { deliveryType: 'pickup' });
+  try {
+    return await ctx.editMessageText(t(lang, 'pickupChoose'), { parse_mode: 'Markdown', ...pickupWarehouseButtons(warehouses, lang) });
+  } catch {
+    return await ctx.reply(t(lang, 'pickupChoose'), { parse_mode: 'Markdown', ...pickupWarehouseButtons(warehouses, lang) });
+  }
+}
+
+// Omborlar ro'yxati: admin paneldagi `warehouses` + asosiy ombor
+async function getPickupWarehouses() {
+  let list = [];
+  try { list = await getCollection('warehouses'); } catch { list = []; }
+  const active = (list || []).filter(w => w.active !== false && (w.pickup !== false));
+  const main = { id: 'main', name: WAREHOUSE.name, address: WAREHOUSE.address || '', phone: WAREHOUSE.phone || '', lat: WAREHOUSE.lat, lng: WAREHOUSE.lng };
+  // Asosiy ombor allaqachon ro'yxatda bo'lmasa, oldiga qo'shamiz
+  if (!active.find(w => w.id === 'main')) return [main, ...active];
+  return active;
+}
+
+// ─── STEP 1c: Aniq ombor tanlandi → to'lovga o'tish ──────────────────────────
+async function handlePickupSelect(ctx, warehouseId) {
+  const lang = langOf(ctx);
+  await ctx.answerCbQuery();
+
+  const warehouses = await getPickupWarehouses();
+  const wh = warehouses.find(w => w.id === warehouseId) || warehouses[0];
+  if (!wh) return ctx.editMessageText(t(lang, 'pickupNoWarehouses'));
+
+  const total = getCartTotal(ctx.from.id);
+  setSession(ctx.from.id, {
+    step: 'waiting_payment',
+    deliveryType: 'pickup',
+    pickupWarehouseId: wh.id,
+    pickupWarehouseName: wh.name,
+    pickupAddress: wh.address || '',
+    pickupPhone: wh.phone || '',
+    orderAddress: wh.name,
+    orderCity: wh.name,
+    deliveryFee: 0,
+    deliveryDistance: 0,
+    deliveryBreakdown: '',
+  });
+
+  const addrLine = wh.address ? `📌 ${wh.address}\n` : '';
+  const phoneLine = wh.phone ? `📞 ${wh.phone}\n` : '';
+  const text = t(lang, 'pickupSelected', {
+    wh: wh.name, addr: addrLine, phone: phoneLine,
+    som: t(lang, 'som'), total: fmtNum(total), grand: fmtNum(total),
+  });
+  await ctx.editMessageText(text, { parse_mode: 'Markdown', ...paymentChoice(lang, true) });
 }
 
 // ─── STEP 2a: Joylashuv (GPS) qabul qilish ───────────────────────────────────
 async function handleLocationMessage(ctx) {
+  const lang = langOf(ctx);
   const s = getSession(ctx.from.id);
   if (s.step !== 'waiting_location') return;
 
   const { latitude: lat, longitude: lng } = ctx.message.location;
-
-  await ctx.reply('⏳ Manzilingiz tekshirilmoqda...', { reply_markup: { remove_keyboard: true } });
+  await ctx.reply(t(lang, 'addrChecking'), { reply_markup: { remove_keyboard: true } });
 
   const cart = getCart(ctx.from.id);
   const orderCount = cart.reduce((sum, i) => sum + i.qty, 0);
-  const result = await checkDelivery(lat, lng, orderCount);
+  const result = await checkDelivery(lat, lng, orderCount, lang);
 
   if (!result.success) {
-    await ctx.reply(result.message, {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('📍 Joylashuvimni yuborish', 'send_location')],
-        [Markup.button.callback('✍️ Manzilni yozish', 'type_address')],
-        [Markup.button.callback('❌ Bekor qilish', 'cancel_order')],
-      ]),
-    });
+    await ctx.reply(result.message, { parse_mode: 'Markdown', ...addressRetryButtons(lang) });
     setSession(ctx.from.id, { step: null });
     return;
   }
 
   setSession(ctx.from.id, {
     step: 'waiting_payment',
-    orderLat: lat,
-    orderLng: lng,
-    orderAddress: result.address,
-    orderCity: result.city,
-    deliveryFee: result.deliveryFee,
-    deliveryDistance: result.distance,
+    deliveryType: 'delivery',
+    orderLat: lat, orderLng: lng,
+    orderAddress: result.address, orderCity: result.city,
+    deliveryFee: result.deliveryFee, deliveryDistance: result.distance,
     deliveryBreakdown: result.breakdown,
   });
 
-  await showDeliveryInfo(ctx, result, cart);
+  await showDeliveryInfo(ctx, result);
 }
 
 // ─── STEP 2b: Matn orqali manzil ─────────────────────────────────────────────
 async function handleTextAddress(ctx) {
+  const lang = langOf(ctx);
   const s = getSession(ctx.from.id);
   if (s.step !== 'waiting_text_address') return;
 
   const address = ctx.message.text;
+  if (address === t(lang, 'cancel')) return handleCancelOrder(ctx);
 
-  // Bekor qilish tugmalari
-  if (address === '❌ Bekor qilish') return handleCancelOrder(ctx);
-
-  await ctx.reply('⏳ Manzil qidirilmoqda...');
+  await ctx.reply(t(lang, 'addrSearching'));
 
   const { geocodeAddress } = require('../services/delivery');
-
-  // Avval O'zbekiston bilan qidirish
-  let geo = await geocodeAddress(address + ', O\'zbekiston');
-
-  // Topilmasa, Toshkent bilan qidirish
-  if (!geo) {
-    geo = await geocodeAddress(address + ', Toshkent, O\'zbekiston');
-  }
+  let geo = await geocodeAddress(address + ", O'zbekiston");
+  if (!geo) geo = await geocodeAddress(address + ', Toshkent, O\'zbekiston');
 
   if (!geo) {
-    return ctx.reply(
-      '❌ Manzil topilmadi.\n\n' +
-      '💡 *Maslahat:* Aniqroq yozing.\n' +
-      '_Masalan: Yunusobod 19-mavze, Chilonzor 7-kvartal_',
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('✍️ Qayta yozish', 'type_address')],
-          [Markup.button.callback('📍 Joylashuvni yuborish', 'send_location')],
-          [Markup.button.callback('❌ Bekor qilish', 'cancel_order')],
-        ]),
-      }
-    );
+    return ctx.reply(t(lang, 'addrNotFound'), { parse_mode: 'Markdown', ...addressRetryButtons(lang) });
   }
 
   const cart = getCart(ctx.from.id);
   const orderCount = cart.reduce((sum, i) => sum + i.qty, 0);
-  const result = await checkDelivery(geo.lat, geo.lng, orderCount);
+  const result = await checkDelivery(geo.lat, geo.lng, orderCount, lang);
 
   if (!result.success) {
-    return ctx.reply(result.message, {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('✍️ Boshqa manzil yozish', 'type_address')],
-        [Markup.button.callback('📍 Joylashuvni yuborish', 'send_location')],
-        [Markup.button.callback('❌ Bekor qilish', 'cancel_order')],
-      ]),
-    });
+    return ctx.reply(result.message, { parse_mode: 'Markdown', ...addressRetryButtons(lang) });
   }
 
   setSession(ctx.from.id, {
     step: 'waiting_payment',
-    orderLat: geo.lat,
-    orderLng: geo.lng,
-    orderAddress: result.address || address,
-    orderCity: result.city || address,
-    deliveryFee: result.deliveryFee,
-    deliveryDistance: result.distance,
+    deliveryType: 'delivery',
+    orderLat: geo.lat, orderLng: geo.lng,
+    orderAddress: result.address || address, orderCity: result.city || address,
+    deliveryFee: result.deliveryFee, deliveryDistance: result.distance,
     deliveryBreakdown: result.breakdown,
   });
 
-  await showDeliveryInfo(ctx, result, cart);
+  await showDeliveryInfo(ctx, result);
 }
 
 // ─── Yetkazib berish ma'lumotlarini ko'rsatish ────────────────────────────────
-async function showDeliveryInfo(ctx, result, cart) {
+async function showDeliveryInfo(ctx, result) {
+  const lang = langOf(ctx);
   const total = getCartTotal(ctx.from.id);
   const grandTotal = total + result.deliveryFee;
+  const discount = result.discountPercent
+    ? t(lang, 'discountLine', { d: t(lang, 'bulkDiscount', { pct: result.discountPercent, n: result.orderCount }) })
+    : '';
 
-  const text =
-    `✅ *Manzil tasdiqlandi!*\n\n` +
-    `📍 ${result.city || result.address}\n` +
-    `📏 Masofa: ${result.distance} km\n` +
-    `🚚 Yetkazib berish: *${fmtNum(result.deliveryFee)} so'm*\n` +
-    `   (${result.breakdown})\n` +
-    (result.discount ? `🎁 Chegirma: ${result.discount}\n` : '') +
-    `━━━━━━━━━━━━━━━\n` +
-    `🛒 Mahsulotlar: ${fmtNum(total)} so'm\n` +
-    `🚚 Yetkazib berish: ${fmtNum(result.deliveryFee)} so'm\n` +
-    `💰 *JAMI: ${fmtNum(grandTotal)} so'm*\n\n` +
-    `To'lov turini tanlang:`;
+  const text = t(lang, 'addrConfirmed', {
+    city: result.city || result.address,
+    dist: result.distance,
+    fee: fmtNum(result.deliveryFee),
+    breakdown: result.breakdown,
+    discount,
+    total: fmtNum(total),
+    grand: fmtNum(grandTotal),
+    som: t(lang, 'som'),
+  });
 
-  await ctx.reply(text, { parse_mode: 'Markdown', ...paymentChoice() });
+  await ctx.reply(text, { parse_mode: 'Markdown', ...paymentChoice(lang, false) });
 }
 
 // ─── STEP 3: To'lov turini tanlash ───────────────────────────────────────────
 async function handlePaymentChoice(ctx, payType) {
+  const lang = langOf(ctx);
   await ctx.answerCbQuery();
   const s = getSession(ctx.from.id);
 
   if (!s.orderAddress) {
-    return ctx.reply('❌ Buyurtma muddati o\'tdi. Qayta boshlang.', mainMenu());
+    return ctx.reply(t(lang, 'payExpired'), mainMenu(lang));
   }
 
+  const isPickup = s.deliveryType === 'pickup';
   setSession(ctx.from.id, { paymentType: payType });
 
   const cart = getCart(ctx.from.id);
@@ -198,35 +233,27 @@ async function handlePaymentChoice(ctx, payType) {
   const grandTotal = total + (s.deliveryFee || 0);
 
   if (payType === 'card') {
-    const text =
-      `💳 *Karta orqali to'lov*\n\n` +
-      `Karta raqami: \`${CARD_NUMBER}\`\n` +
-      `Karta egasi: ${CARD_OWNER}\n\n` +
-      `💰 To'lov summasi: *${fmtNum(grandTotal)} so'm*\n\n` +
-      `✅ To'lovni amalga oshirib, *chek rasmini* (screenshot) shu yerga yuboring.`;
-
+    const text = t(lang, 'payCardText', { card: CARD_NUMBER, owner: CARD_OWNER, grand: fmtNum(grandTotal), som: t(lang, 'som') });
     await ctx.editMessageText(text, {
       parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'cancel_order')]]),
+      ...Markup.inlineKeyboard([[Markup.button.callback(t(lang, 'cancel'), 'cancel_order')]]),
     });
     setSession(ctx.from.id, { step: 'waiting_payment_photo', paymentType: 'card' });
   } else {
     setSession(ctx.from.id, { step: 'confirm_order', paymentType: 'cash' });
-    await showOrderSummary(ctx, s, cart, total, grandTotal, 'cash');
+    await showOrderSummary(ctx, getSession(ctx.from.id), cart, total, grandTotal, 'cash', isPickup);
   }
 }
 
 // ─── STEP 3a: To'lov chekini qabul qilish ────────────────────────────────────
 async function handlePaymentPhoto(ctx) {
+  const lang = langOf(ctx);
   const s = getSession(ctx.from.id);
   if (s.step !== 'waiting_payment_photo') return;
 
   const photo = ctx.message.photo;
   const doc = ctx.message.document;
-
-  if (!photo && !doc) {
-    return ctx.reply('❌ Iltimos, chek rasmini (foto) yuboring.');
-  }
+  if (!photo && !doc) return ctx.reply(t(lang, 'sendReceiptPhoto'));
 
   const fileId = photo ? photo[photo.length - 1].file_id : doc.file_id;
   setSession(ctx.from.id, { step: 'confirm_order', paymentPhotoId: fileId });
@@ -235,53 +262,52 @@ async function handlePaymentPhoto(ctx) {
   const total = getCartTotal(ctx.from.id);
   const grandTotal = total + (s.deliveryFee || 0);
 
-  await ctx.reply('✅ Chek qabul qilindi!', { reply_markup: { remove_keyboard: true } });
-  await showOrderSummary(ctx, s, cart, total, grandTotal, 'card');
+  await ctx.reply(t(lang, 'receiptAccepted'), { reply_markup: { remove_keyboard: true } });
+  await showOrderSummary(ctx, getSession(ctx.from.id), cart, total, grandTotal, 'card', s.deliveryType === 'pickup');
 }
 
 // ─── Buyurtma xulosasini ko'rsatish ──────────────────────────────────────────
-async function showOrderSummary(ctx, s, cart, total, grandTotal, payType) {
-  const cartText = cart.map((i, idx) =>
-    `${idx + 1}. ${i.name} × ${i.qty} = ${fmtNum(i.qty * i.price)} so'm`
+async function showOrderSummary(ctx, s, cart, total, grandTotal, payType, isPickup) {
+  const lang = langOf(ctx);
+  const items = cart.map((i, idx) =>
+    `${idx + 1}. ${i.name} × ${i.qty} = ${fmtNum(i.qty * i.price)} ${t(lang, 'som')}`
   ).join('\n');
 
-  const text =
-    `📋 *Buyurtma xulosasi*\n\n` +
-    `🛒 *Mahsulotlar:*\n${cartText}\n\n` +
-    `📍 Manzil: ${s.orderCity || s.orderAddress}\n` +
-    `📏 Masofa: ${s.deliveryDistance || 0} km\n` +
-    `🚚 Yetkazib berish: ${fmtNum(s.deliveryFee || 0)} so'm\n` +
-    `💳 To'lov: ${payType === 'cash' ? '💵 Naqd' : '💳 Karta'}\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `💰 *JAMI: ${fmtNum(grandTotal)} so'm*\n\n` +
-    `Tasdiqlaysizmi?`;
+  const recv = isPickup
+    ? t(lang, 'recvPickupBlock', { wh: s.pickupWarehouseName || s.orderAddress, som: t(lang, 'som') })
+    : t(lang, 'recvDeliveryBlock', { city: s.orderCity || s.orderAddress, dist: s.deliveryDistance || 0, fee: fmtNum(s.deliveryFee || 0), som: t(lang, 'som') });
 
-  await ctx.reply(text, { parse_mode: 'Markdown', ...confirmOrder() });
+  const text = t(lang, 'orderSummary', {
+    items, recv, pay: payLabel(lang, payType, isPickup),
+    grand: fmtNum(grandTotal), som: t(lang, 'som'),
+  });
+
+  await ctx.reply(text, { parse_mode: 'Markdown', ...confirmOrder(lang) });
 }
 
 // ─── STEP 4: Buyurtmani tasdiqlash ───────────────────────────────────────────
 async function handleOrderConfirm(ctx) {
-  await ctx.answerCbQuery('✅ Buyurtma joylashtirilmoqda...');
+  const lang = langOf(ctx);
+  await ctx.answerCbQuery(t(lang, 'orderPlacing'));
   const s = getSession(ctx.from.id);
   const cart = getCart(ctx.from.id);
 
   if (!cart.length || !s.orderAddress) {
-    return ctx.editMessageText('❌ Xatolik. Qayta buyurtma bering.');
+    return ctx.editMessageText(t(lang, 'orderErrorRetry'));
   }
 
+  const isPickup = s.deliveryType === 'pickup';
   const tgId = String(ctx.from.id);
   const users = await queryDocs('telegramUsers', 'telegramId', '==', tgId);
   const user = users[0] || {};
 
   const total = getCartTotal(ctx.from.id);
-  const deliveryFee = s.deliveryFee || 0;
+  const deliveryFee = isPickup ? 0 : (s.deliveryFee || 0);
 
-  // Promo-kod chegirmasini qo'llash (agar mavjud bo'lsa)
   const { calcPromoDiscount } = require('../utils/helpers');
   const promo = s.activePromo || null;
   const promoDiscount = promo ? calcPromoDiscount(promo, total) : 0;
 
-  // Sodiqlik ballarini sarflash (agar foydalanuvchi tanlagan bo'lsa)
   const pointsToRedeem = Math.min(s.redeemPoints || 0, user.loyaltyPoints || 0);
   const pointsDiscount = pointsToRedeem * require('../utils/helpers').LOYALTY_POINT_VALUE;
 
@@ -298,6 +324,9 @@ async function handleOrderConfirm(ctx) {
     items: cart.map(i => ({ ...i })),
     total,
     deliveryFee,
+    deliveryType: isPickup ? 'pickup' : 'delivery',
+    pickupWarehouseId: isPickup ? (s.pickupWarehouseId || '') : null,
+    pickupWarehouseName: isPickup ? (s.pickupWarehouseName || '') : null,
     promoCode: promo?.code || null,
     promoDiscount,
     pointsRedeemed: pointsToRedeem,
@@ -312,13 +341,13 @@ async function handleOrderConfirm(ctx) {
     location: s.orderLat ? { lat: s.orderLat, lng: s.orderLng } : null,
     deliveryDistance: s.deliveryDistance || 0,
     note: s.orderNote || '',
+    lang,
     source: 'telegram',
   };
 
   const orderId = await addDoc('orders', orderData);
   await addLog('order', `Yangi buyurtma: ${orderNum} — ${user.firstName || tgId}`, { orderId, total: grandTotal });
 
-  // Foydalanuvchi statistikasini yangilash
   if (user.id) {
     await updateDoc('telegramUsers', user.id, {
       orderCount: (user.orderCount || 0) + 1,
@@ -328,22 +357,21 @@ async function handleOrderConfirm(ctx) {
   }
 
   // Mahsulot miqdorlarini yangilash
-  for (const item of cart) {
-    try {
-      const all = await require('../services/firebase').getCollection('products');
+  try {
+    const all = await getCollection('products');
+    for (const item of cart) {
       const prod = all.find(p => p.id === item.productId);
       if (prod) {
         await updateDoc('products', item.productId, {
           quantity: Math.max(0, (prod.quantity || 0) - item.qty),
-        });
+        }).catch(() => { });
       }
-    } catch { }
-  }
+    }
+  } catch { }
 
   clearCart(ctx.from.id);
   setSession(ctx.from.id, { step: null, currentOrderId: orderId, activePromo: null, redeemPoints: 0 });
 
-  // Sodiqlik ballarini sarflash va yangi ball qo'shish
   try {
     const { redeemLoyaltyPoints, awardLoyaltyPoints, markPromoUsed } = require('./loyalty');
     if (pointsToRedeem > 0) await redeemLoyaltyPoints(tgId, pointsToRedeem);
@@ -353,35 +381,41 @@ async function handleOrderConfirm(ctx) {
     console.error('Loyalty award error:', e.message);
   }
 
-  // Foydalanuvchiga tasdiqlash xabari
   const earnedPoints = require('../utils/helpers').calcEarnedPoints(grandTotal);
-  const userText =
-    `🎉 *Buyurtma qabul qilindi!*\n\n` +
-    `📋 Buyurtma №: *${orderNum}*\n` +
-    (promoDiscount > 0 ? `🎟️ Promo chegirma: -${fmtNum(promoDiscount)} so'm\n` : '') +
-    (pointsDiscount > 0 ? `💰 Ball chegirmasi: -${fmtNum(pointsDiscount)} so'm (${pointsToRedeem} ball)\n` : '') +
-    `💰 Jami: *${fmtNum(grandTotal)} so'm*\n` +
-    `🚚 Yetkazib berish: ${fmtNum(deliveryFee)} so'm\n` +
-    `📍 Manzil: ${s.orderCity || s.orderAddress}\n\n` +
-    `🎁 Siz *+${fmtNum(earnedPoints)} bonus ball* olasiz!\n\n` +
-    (s.paymentType === 'card'
-      ? '⏳ _To\'lovingiz tekshirilmoqda. Tez orada xabar beramiz._\n\n'
-      : '💵 _To\'lovni yetkazuvchiga naqd to\'laysiz._\n\n') +
-    `📞 Muammo bo'lsa bog'laning.\n\n` +
-    `_Buyurtma holati o'zgarganda xabardor qilinasiz!_ 📲`;
+  const som = t(lang, 'som');
+
+  const recv = isPickup
+    ? t(lang, 'acceptedRecvPickup', { wh: s.pickupWarehouseName || s.orderAddress })
+    : t(lang, 'acceptedRecvDelivery', { fee: fmtNum(deliveryFee), city: s.orderCity || s.orderAddress, som });
+
+  const promoLine = promoDiscount > 0 ? t(lang, 'promoDiscLine', { d: fmtNum(promoDiscount), som }) : '';
+  const pointsLine = pointsDiscount > 0 ? t(lang, 'pointsDiscLine', { d: fmtNum(pointsDiscount), p: pointsToRedeem, som }) : '';
+  const payNote = s.paymentType === 'card'
+    ? t(lang, 'payNoteCard')
+    : (isPickup ? t(lang, 'payNoteCashPickup') : t(lang, 'payNoteCashDelivery'));
+
+  const userText = t(lang, 'orderAccepted', {
+    num: orderNum, promo: promoLine, points: pointsLine,
+    grand: fmtNum(grandTotal), recv, earned: fmtNum(earnedPoints), payNote, som,
+  });
 
   await ctx.editMessageText(userText, {
     parse_mode: 'Markdown',
-    ...Markup.inlineKeyboard([[Markup.button.callback('📋 Buyurtmalarim', 'my_orders')]]),
+    ...Markup.inlineKeyboard([[Markup.button.callback(t(lang, 'btnMyOrders'), 'my_orders')]]),
   });
 
-  // Adminlarga xabar yuborish
   await notifyAdmins(ctx, orderData, orderId, s);
 }
 
 // ─── Adminlarga xabar yuborish ────────────────────────────────────────────────
 async function notifyAdmins(ctx, order, orderId, s) {
   const bot = ctx.telegram;
+  const isPickup = order.deliveryType === 'pickup';
+
+  const recvLine = isPickup
+    ? `🏪 Borib olish: ${order.pickupWarehouseName || '-'}\n`
+    : `📍 Manzil: ${order.deliveryCity || order.deliveryAddress}\n📏 Masofa: ${order.deliveryDistance} km\n` +
+      (order.location ? `🗺️ [Xaritada ko'rish](https://maps.google.com/?q=${order.location.lat},${order.location.lng})\n` : '');
 
   const adminText =
     `🆕 *YANGI BUYURTMA!*\n\n` +
@@ -392,11 +426,9 @@ async function notifyAdmins(ctx, order, orderId, s) {
     `🛒 *Mahsulotlar:*\n` +
     order.items.map(i => `• ${i.name} × ${i.qty} = ${fmtNum(i.qty * i.price)} so'm`).join('\n') +
     `\n\n💰 Mahsulot: ${fmtNum(order.total)} so'm\n` +
-    `🚚 Yetkazib berish: ${fmtNum(order.deliveryFee)} so'm\n` +
+    `🚚 Yetkazib berish: ${isPickup ? '0 (borib olish)' : fmtNum(order.deliveryFee)} so'm\n` +
     `💳 *JAMI: ${fmtNum(order.grandTotal)} so'm*\n\n` +
-    `📍 Manzil: ${order.deliveryCity || order.deliveryAddress}\n` +
-    `📏 Masofa: ${order.deliveryDistance} km\n` +
-    (order.location ? `🗺️ [Xaritada ko'rish](https://maps.google.com/?q=${order.location.lat},${order.location.lng})\n` : '') +
+    recvLine +
     `💳 To'lov: ${order.paymentType === 'card' ? '💳 Karta (chek kutilmoqda)' : '💵 Naqd'}\n\n` +
     `🕐 ${new Date().toLocaleString('uz-UZ')}`;
 
@@ -406,8 +438,6 @@ async function notifyAdmins(ctx, order, orderId, s) {
 
   for (const adminId of targets) {
     try {
-      // 1. Mahsulot rasmlari
-      const { getCollection } = require('../services/firebase');
       const allProducts = await getCollection('products');
       const itemsWithImages = order.items.filter(i => {
         const prod = allProducts.find(p => p.id === i.productId);
@@ -418,25 +448,19 @@ async function notifyAdmins(ctx, order, orderId, s) {
         const mediaGroup = itemsWithImages.slice(0, 10).map((item, idx) => {
           const prod = allProducts.find(p => p.id === item.productId);
           return {
-            type: 'photo',
-            media: prod.imageUrl,
-            caption: idx === 0
-              ? `🖼️ *Buyurtma rasmlari*\n📋 ${order.orderNumber}`
-              : `📦 ${item.name} × ${item.qty}`,
+            type: 'photo', media: prod.imageUrl,
+            caption: idx === 0 ? `🖼️ *Buyurtma rasmlari*\n📋 ${order.orderNumber}` : `📦 ${item.name} × ${item.qty}`,
             parse_mode: 'Markdown',
           };
         });
         await bot.sendMediaGroup(adminId, mediaGroup).catch(async () => {
           const firstProd = allProducts.find(p => p.id === itemsWithImages[0].productId);
           if (firstProd?.imageUrl) {
-            await bot.sendPhoto(adminId, firstProd.imageUrl, {
-              caption: `🖼️ Buyurtma: ${order.orderNumber}`,
-            }).catch(() => { });
+            await bot.sendPhoto(adminId, firstProd.imageUrl, { caption: `🖼️ Buyurtma: ${order.orderNumber}` }).catch(() => { });
           }
         });
       }
 
-      // 2. Karta to'lov cheki
       if (order.paymentType === 'card' && order.paymentPhotoId) {
         await bot.sendPhoto(adminId, order.paymentPhotoId, {
           caption: `💳 *KARTA TO'LOV CHEKI*\n📋 ${order.orderNumber}\n💰 ${fmtNum(order.grandTotal)} so'm`,
@@ -444,17 +468,11 @@ async function notifyAdmins(ctx, order, orderId, s) {
         }).catch(() => { });
       }
 
-      // 3. Lokatsiya (GPS bo'lsa)
       if (order.location) {
         await bot.sendLocation(adminId, order.location.lat, order.location.lng).catch(() => { });
       }
 
-      // 4. Asosiy xabar
-      await bot.sendMessage(adminId, adminText, {
-        parse_mode: 'Markdown',
-        ...keyboard,
-        disable_web_page_preview: true,
-      });
+      await bot.sendMessage(adminId, adminText, { parse_mode: 'Markdown', ...keyboard, disable_web_page_preview: true });
     } catch (e) {
       console.error('Admin notify error:', e.message);
     }
@@ -463,79 +481,75 @@ async function notifyAdmins(ctx, order, orderId, s) {
 
 // ─── Buyurtmani bekor qilish ──────────────────────────────────────────────────
 async function handleCancelOrder(ctx) {
+  const lang = langOf(ctx);
   if (ctx.callbackQuery) await ctx.answerCbQuery();
   setSession(ctx.from.id, { step: null });
   clearCart(ctx.from.id);
-  const msg = '❌ Buyurtma bekor qilindi. Savatdagi mahsulotlar o\'chirildi.';
+  const msg = t(lang, 'orderCancelled');
   if (ctx.callbackQuery) {
-    try {
-      await ctx.editMessageText(msg, mainMenu());
-    } catch {
-      await ctx.reply(msg, mainMenu());
-    }
+    try { await ctx.editMessageText(msg, mainMenu(lang)); } catch { await ctx.reply(msg, mainMenu(lang)); }
   } else {
-    await ctx.reply(msg, mainMenu());
+    await ctx.reply(msg, mainMenu(lang));
   }
 }
 
 // ─── Buyurtmalarim ────────────────────────────────────────────────────────────
 async function handleMyOrders(ctx) {
+  const lang = langOf(ctx);
   if (ctx.callbackQuery) await ctx.answerCbQuery();
   const tgId = String(ctx.from.id);
   const orders = await queryDocs('orders', 'telegramId', '==', tgId);
-  orders.sort((a, b) => {
-    const ta = a.createdAt?.seconds || 0;
-    const tb = b.createdAt?.seconds || 0;
-    return tb - ta;
-  });
+  orders.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
 
   if (!orders.length) {
-    const msg = '📋 Siz hali buyurtma bermagansiz.';
-    const kb = Markup.inlineKeyboard([[Markup.button.callback('🛍️ Xarid qilish', 'categories')]]);
+    const msg = t(lang, 'noOrdersYet');
+    const kb = Markup.inlineKeyboard([[Markup.button.callback(t(lang, 'btnShop'), 'categories')]]);
     if (ctx.callbackQuery) return ctx.editMessageText(msg, kb);
     return ctx.reply(msg, kb);
   }
 
   const { myOrdersButtons } = require('../utils/keyboards');
-  const text = `📋 *Buyurtmalarim* (${orders.length} ta)\n\nBuyurtmani tanlang:`;
-
+  const text = t(lang, 'myOrdersTitle', { n: orders.length });
   if (ctx.callbackQuery) {
-    return ctx.editMessageText(text, { parse_mode: 'Markdown', ...myOrdersButtons(orders, 0) });
+    return ctx.editMessageText(text, { parse_mode: 'Markdown', ...myOrdersButtons(orders, 0, lang) });
   }
-  await ctx.reply(text, { parse_mode: 'Markdown', ...myOrdersButtons(orders, 0) });
+  await ctx.reply(text, { parse_mode: 'Markdown', ...myOrdersButtons(orders, 0, lang) });
 }
 
 // ─── Buyurtma tafsilotlari ────────────────────────────────────────────────────
 async function handleViewMyOrder(ctx, orderId) {
+  const lang = langOf(ctx);
   await ctx.answerCbQuery();
   const order = await require('../services/firebase').getDoc('orders', orderId);
-  if (!order) return ctx.editMessageText('❌ Buyurtma topilmadi.');
+  if (!order) return ctx.editMessageText(t(lang, 'orderNotFound'));
 
-  const text =
-    `📋 *Buyurtma: ${order.orderNumber}*\n\n` +
-    `📊 Holat: ${orderStatusLabel(order.status)}\n` +
-    `💰 Jami: *${fmtNum(order.grandTotal)} so'm*\n` +
-    `🚚 Yetkazib berish: ${fmtNum(order.deliveryFee)} so'm\n` +
-    `📍 Manzil: ${order.deliveryCity || order.deliveryAddress}\n` +
-    `💳 To'lov: ${order.paymentType === 'cash' ? '💵 Naqd' : '💳 Karta'}\n\n` +
-    `🛒 *Mahsulotlar:*\n` +
-    (order.items || []).map(i => `• ${i.name} × ${i.qty} = ${fmtNum(i.qty * i.price)} so'm`).join('\n') +
-    `\n\n🕐 Sana: ${fmtDate(order.createdAt)}`;
+  const isPickup = order.deliveryType === 'pickup';
+  const som = t(lang, 'som');
+  const recv = isPickup
+    ? t(lang, 'acceptedRecvPickup', { wh: order.pickupWarehouseName || order.deliveryAddress })
+    : t(lang, 'recvDeliveryBlock', { city: order.deliveryCity || order.deliveryAddress, dist: order.deliveryDistance || 0, fee: fmtNum(order.deliveryFee), som });
+
+  const items = (order.items || []).map(i => `• ${i.name} × ${i.qty} = ${fmtNum(i.qty * i.price)} ${som}`).join('\n');
+  const text = t(lang, 'orderDetail', {
+    num: order.orderNumber,
+    status: orderStatusLabel(order.status, lang),
+    grand: fmtNum(order.grandTotal), som, recv,
+    pay: payLabel(lang, order.paymentType, isPickup),
+    items, date: fmtDate(order.createdAt),
+  });
 
   const btns = [];
-  if (order.location) {
-    btns.push([Markup.button.url('🗺️ Xaritada', `https://maps.google.com/?q=${order.location.lat},${order.location.lng}`)]);
-  }
-  btns.push([Markup.button.callback('🔙 Orqaga', 'my_orders')]);
+  if (order.location) btns.push([Markup.button.url(t(lang, 'btnOnMap'), `https://maps.google.com/?q=${order.location.lat},${order.location.lng}`)]);
+  btns.push([Markup.button.callback(t(lang, 'back'), 'my_orders')]);
 
-  await ctx.editMessageText(text, {
-    parse_mode: 'Markdown',
-    ...Markup.inlineKeyboard(btns),
-  });
+  await ctx.editMessageText(text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(btns) });
 }
 
 module.exports = {
   handleOrderStart,
+  handleReceiveDelivery,
+  handlePickupStart,
+  handlePickupSelect,
   handleLocationMessage,
   handleTextAddress,
   handlePaymentChoice,

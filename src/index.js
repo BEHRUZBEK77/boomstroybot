@@ -5,20 +5,22 @@ const { initFirebase } = require('./services/firebase');
 const { authMiddleware } = require('./middlewares/auth');
 const { startCrons, setBotInstance } = require('./services/cron');
 const { getSession, setSession } = require('./services/session');
+const { t, langOf, variantsOf, SITE_URL } = require('./utils/i18n');
 
 // Handlers
 const { handleStart, handleContact: handleContactMsg, handleHelp, handleCheckSub } = require('./handlers/start');
-const { handleCatalog, handleCategoryCallback, handleProductCallback, handleProductDetail, handleSearch, performSearch } = require('./handlers/catalog');
+const { handleCatalog, handleCategoryCallback, handleProductCallback, handleProductDetail, performSearch } = require('./handlers/catalog');
 const { handleViewCart, handleAddToCart, handleDecFromCart, handleClearCart } = require('./handlers/cart');
 const {
-  handleOrderStart, handleLocationMessage, handleTextAddress,
+  handleOrderStart, handleReceiveDelivery, handlePickupStart, handlePickupSelect,
+  handleLocationMessage, handleTextAddress,
   handlePaymentChoice, handlePaymentPhoto, handleOrderConfirm,
   handleCancelOrder, handleMyOrders, handleViewMyOrder,
 } = require('./handlers/order');
 const {
   handleProfile, handleChangePhone, handleUpdatePhone,
   handleDeliveryInfo, handleCheckMyLocation, handleLocationCheckOnly,
-  handleContact, handleAbout, handleSales,
+  handleContact, handleAbout, handleSales, handleWebsite,
 } = require('./handlers/profile');
 const {
   isAdmin, handleAdminDashboard, handleAdminOrders, handleAdminViewOrder,
@@ -28,6 +30,7 @@ const {
 } = require('./handlers/admin');
 const {
   handleLoyaltyMenu, handleLoyaltyBalance, handleDailyBonus, handleLoyaltyTiers,
+  handleRewardsShop, handleRewardDetail, handleRewardRedeem,
   handleReferralInfo, handlePromoEnterStart, handlePromoCodeText,
   handleFavoriteToggle, handleViewFavorites, handleAddAllFavoritesToCart,
   handleReviewStart, handleReviewStarSelect, handleReviewTextSave, handleReviewSkip,
@@ -43,7 +46,11 @@ const {
 // ── INIT ──────────────────────────────────────────────────────────────────────
 initFirebase();
 
-const BOT_TOKEN = process.env.BOT_TOKEN || '7809793171:AAFACuPwz4-_YQOVPbXsZ0dJ8vcu_PcMtWQ';
+const BOT_TOKEN = process.env.BOT_TOKEN;
+if (!BOT_TOKEN) {
+  console.error('❌ BOT_TOKEN o\'rnatilmagan! .env faylida BOT_TOKEN ni belgilang.');
+  process.exit(1);
+}
 const bot = new Telegraf(BOT_TOKEN);
 setBotInstance(bot);
 
@@ -55,71 +62,74 @@ bot.start(handleStart);
 bot.help(handleHelp);
 bot.command('admin', (ctx) => {
   if (isAdmin(ctx)) handleAdminDashboard(ctx);
-  else ctx.reply('❌ Ruxsat yo\'q.');
+  else ctx.reply(t(langOf(ctx), 'noAccess'));
 });
 bot.command('cancel', handleCancelOrder);
 bot.command('cart', handleViewCart);
 bot.command('orders', handleMyOrders);
 bot.command('profile', handleProfile);
-
-// ── TEXT MESSAGES ─────────────────────────────────────────────────────────────
-bot.hears('🛍️ Mahsulotlar', handleCatalog);
-bot.hears('🛒 Savat', handleViewCart);
-bot.hears('📋 Buyurtmalarim', handleMyOrders);
-bot.hears('👤 Profilim', handleProfile);
-bot.hears('📍 Yetkazib berish', handleDeliveryInfo);
-bot.hears('📞 Aloqa', handleContact);
-bot.hears('ℹ️ Haqida', handleAbout);
-bot.hears('⭐ Aksiyalar', handleSales);
-bot.hears('❌ Bekor qilish', handleCancelOrder);
-
-// Yangi mijoz funksiyalari
-bot.hears('❤️ Sevimlilar', handleViewFavorites);
-bot.hears('🎁 Bonus va Sodiqlik', handleLoyaltyMenu);
 bot.command('faq', handleFAQ);
 bot.command('referral', handleReferralInfo);
 bot.command('bonus', handleLoyaltyMenu);
 bot.command('support', handleSupportNewTicket);
 bot.command('lang', handleLanguageMenu);
 bot.command('recent', handleRecentlyViewed);
+bot.command('site', handleWebsite);
 
-// Admin menu
-bot.hears('📊 Dashboard', handleAdminDashboard);
-bot.hears('📦 Mahsulotlar', handleAdminProducts);
-bot.hears('📋 Buyurtmalar', (ctx) => handleAdminOrders(ctx, 'all'));
-bot.hears('👥 Mijozlar', handleAdminCustomers);
-bot.hears('🏭 Omborlar', async (ctx) => {
+// ── FOYDALANUVCHI MENYUSI (ko'p tilli) ──────────────────────────────────────
+bot.hears(variantsOf('m_website'), handleWebsite);
+bot.hears(variantsOf('m_products'), handleCatalog);
+bot.hears(variantsOf('m_cart'), handleViewCart);
+bot.hears(variantsOf('m_orders'), handleMyOrders);
+bot.hears(variantsOf('m_profile'), handleProfile);
+bot.hears(variantsOf('m_favorites'), handleViewFavorites);
+bot.hears(variantsOf('m_loyalty'), handleLoyaltyMenu);
+bot.hears(variantsOf('m_delivery'), handleDeliveryInfo);
+bot.hears(variantsOf('m_contact'), handleContact);
+bot.hears(variantsOf('m_about'), handleAbout);
+bot.hears(variantsOf('m_sales'), handleSales);
+bot.hears(variantsOf('m_language'), handleLanguageMenu);
+bot.hears(variantsOf('cancel'), handleCancelOrder);
+
+// ── ADMIN MENYUSI ─────────────────────────────────────────────────────────────
+bot.hears(variantsOf('am_dashboard'), handleAdminDashboard);
+bot.hears(variantsOf('am_products'), handleAdminProducts);
+bot.hears(variantsOf('am_orders'), (ctx) => handleAdminOrders(ctx, 'all'));
+bot.hears(variantsOf('am_customers'), handleAdminCustomers);
+bot.hears(variantsOf('am_warehouses'), async (ctx) => {
   if (!isAdmin(ctx)) return;
   const { getCollection } = require('./services/firebase');
+  const { WAREHOUSE } = require('./services/delivery');
   const warehouses = await getCollection('warehouses');
   const products = await getCollection('products');
   let text = '🏭 *Omborlar*\n\n';
-  const allWh = [{ id: 'main', name: 'Asosiy ombor' }, ...warehouses];
+  const allWh = [{ id: 'main', name: WAREHOUSE.name }, ...warehouses];
   allWh.forEach(w => {
     const cnt = products.filter(p => (p.warehouse || 'main') === w.id).length;
     text += `🏭 ${w.name}: ${cnt} ta mahsulot\n`;
   });
+  text += `\n_Borib olish omborlari shu ro'yxatdan olinadi._`;
   ctx.reply(text, { parse_mode: 'Markdown' });
 });
-bot.hears('📈 Statistika', handleAdminStats);
-bot.hears('💬 Xabar yuborish', handleAdminBroadcast);
-bot.hears('⚙️ Sozlamalar', async (ctx) => {
+bot.hears(variantsOf('am_stats'), handleAdminStats);
+bot.hears(variantsOf('am_broadcast'), handleAdminBroadcast);
+bot.hears(variantsOf('am_settings'), async (ctx) => {
   if (!isAdmin(ctx)) return;
   const { Markup } = require('telegraf');
+  const panel = process.env.ADMIN_PANEL_URL || SITE_URL;
   ctx.reply(
-    `⚙️ *Sozlamalar*\n\nAdmin panelni veb-sayt orqali boshqaring:\n🌐 ${process.env.WEBHOOK_URL || 'https://yourapp.railway.app'}`,
-    { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.url('🌐 Saytga o\'tish', process.env.WEBHOOK_URL || 'https://yourapp.railway.app')]]) }
+    `⚙️ *Sozlamalar*\n\nAdmin panelni veb-sayt orqali boshqaring:\n🌐 ${panel}`,
+    { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.url('🌐 Saytga o\'tish', panel)]]) }
   );
 });
-bot.hears('🔙 Foydalanuvchi menyu', async (ctx) => {
-  const { mainMenuV2 } = require('./utils/keyboards');
-  ctx.reply('Bosh menyu:', mainMenuV2());
+bot.hears(variantsOf('am_userMenu'), async (ctx) => {
+  const { mainMenu } = require('./utils/keyboards');
+  ctx.reply(t(langOf(ctx), 'mainMenuTitle'), mainMenu(langOf(ctx)));
 });
 
 // ── CONTACT (phone) ───────────────────────────────────────────────────────────
 bot.on('contact', async (ctx) => {
   const s = getSession(ctx.from.id);
-  if (s.step === 'waiting_phone') return handleContactMsg(ctx);
   if (s.step === 'change_phone') return handleUpdatePhone(ctx);
   return handleContactMsg(ctx);
 });
@@ -129,10 +139,11 @@ bot.on('location', async (ctx) => {
   const s = getSession(ctx.from.id);
   if (s.step === 'waiting_location') return handleLocationMessage(ctx);
   if (s.step === 'check_location_only') return handleLocationCheckOnly(ctx);
-  ctx.reply('📍 Joylashuv qabul qilindi. Buyurtma berish uchun savatdan boshlang.', require('./utils/keyboards').mainMenu());
+  const { mainMenu } = require('./utils/keyboards');
+  ctx.reply(t(langOf(ctx), 'locationReceived'), mainMenu(langOf(ctx)));
 });
 
-// ── PHOTO (payment check) ─────────────────────────────────────────────────────
+// ── PHOTO / DOCUMENT (payment) ────────────────────────────────────────────────
 bot.on(['photo', 'document'], async (ctx) => {
   const s = getSession(ctx.from.id);
   if (s.step === 'waiting_payment_photo') return handlePaymentPhoto(ctx);
@@ -143,13 +154,13 @@ bot.on('text', async (ctx) => {
   const s = getSession(ctx.from.id);
   const text = ctx.message.text;
 
-  if (text === '❌ Bekor qilish') return handleCancelOrder(ctx);
+  if (variantsOf('cancel').includes(text)) return handleCancelOrder(ctx);
 
   switch (s.step) {
     case 'searching': return performSearch(ctx, text);
     case 'waiting_text_address': return handleTextAddress(ctx);
     case 'admin_broadcast': return handleBroadcastMessage(ctx);
-    case 'change_phone': return ctx.reply('Iltimos, tugmani bosib raqam ulashing.');
+    case 'change_phone': return ctx.reply(t(langOf(ctx), 'phoneShareHint'));
     case 'entering_promo': return handlePromoCodeText(ctx);
     case 'writing_review': return handleReviewTextSave(ctx);
     case 'support_writing': return handleSupportTicketSave(ctx);
@@ -163,6 +174,8 @@ bot.on('callback_query', async (ctx) => {
   if (!data) return ctx.answerCbQuery();
 
   try {
+    const lang = langOf(ctx);
+
     // Categories
     if (data === 'categories') return handleCatalog(ctx);
     if (data.startsWith('cat:')) return handleCategoryCallback(ctx, data.slice(4));
@@ -172,7 +185,7 @@ bot.on('callback_query', async (ctx) => {
       const cats = await getCollection('categories', 'name', 'asc');
       await ctx.answerCbQuery();
       const { categoryButtons } = require('./utils/keyboards');
-      return ctx.editMessageReplyMarkup(categoryButtons(cats, page).reply_markup);
+      return ctx.editMessageReplyMarkup(categoryButtons(cats, page, lang).reply_markup);
     }
     if (data.startsWith('prod_page:')) {
       const parts = data.split(':');
@@ -191,27 +204,27 @@ bot.on('callback_query', async (ctx) => {
 
     // Order flow
     if (data === 'order_start') return handleOrderStart(ctx);
+    if (data === 'recv_delivery') return handleReceiveDelivery(ctx);
+    if (data === 'recv_pickup') return handlePickupStart(ctx);
+    if (data.startsWith('pickup_wh:')) return handlePickupSelect(ctx, data.slice(10));
     if (data === 'send_location') {
       await ctx.answerCbQuery();
       const { sendLocationButton } = require('./utils/keyboards');
       setSession(ctx.from.id, { step: 'waiting_location' });
-      return ctx.reply('📍 Joylashuvingizni yuboring:', sendLocationButton());
+      return ctx.reply(t(lang, 'sendLocationPrompt'), sendLocationButton(lang));
     }
     if (data === 'type_address') {
       await ctx.answerCbQuery();
+      const { cancelButton } = require('./utils/keyboards');
       setSession(ctx.from.id, { step: 'waiting_text_address' });
-      return ctx.reply('✍️ Manzilingizni yozing (masalan: Yunusobod, 19-mavze):',
-        require('./utils/keyboards').cancelButton());
+      return ctx.reply(t(lang, 'typeAddressPrompt'), cancelButton(lang));
     }
     if (data.startsWith('pay_cash')) return handlePaymentChoice(ctx, 'cash');
     if (data.startsWith('pay_card')) return handlePaymentChoice(ctx, 'card');
     if (data === 'order_confirm') return handleOrderConfirm(ctx);
     if (data === 'cancel_order') return handleCancelOrder(ctx);
     if (data === 'back_to_cart') return handleViewCart(ctx);
-    if (data === 'order_edit') {
-      await ctx.answerCbQuery();
-      return handleOrderStart(ctx);
-    }
+    if (data === 'order_edit') { await ctx.answerCbQuery(); return handleOrderStart(ctx); }
 
     // My orders
     if (data === 'my_orders') return handleMyOrders(ctx);
@@ -223,34 +236,32 @@ bot.on('callback_query', async (ctx) => {
       orders.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
       await ctx.answerCbQuery();
       const { myOrdersButtons } = require('./utils/keyboards');
-      return ctx.editMessageReplyMarkup(myOrdersButtons(orders, page).reply_markup);
+      return ctx.editMessageReplyMarkup(myOrdersButtons(orders, page, lang).reply_markup);
     }
 
     // Profile
     if (data === 'change_phone') return handleChangePhone(ctx);
-
-    // Delivery check
     if (data === 'check_my_location') return handleCheckMyLocation(ctx);
 
-    // ── YANGI MIJOZ FUNKSIYALARI ──────────────────────────────────────────────
-    // Loyalty / Bonus
+    // ── LOYALTY / BONUS ──
     if (data === 'loyalty_menu') return handleLoyaltyMenu(ctx);
     if (data === 'loyalty_balance') return handleLoyaltyBalance(ctx);
     if (data === 'loyalty_daily') return handleDailyBonus(ctx);
     if (data === 'loyalty_tiers') return handleLoyaltyTiers(ctx);
 
-    // Referral
-    if (data === 'referral_info') return handleReferralInfo(ctx);
+    // Rewards shop
+    if (data === 'rewards_shop') return handleRewardsShop(ctx, 0);
+    if (data.startsWith('rewards_page:')) return handleRewardsShop(ctx, parseInt(data.slice(13)));
+    if (data.startsWith('reward_redeem:')) return handleRewardRedeem(ctx, data.slice(14));
+    if (data.startsWith('reward:')) return handleRewardDetail(ctx, data.slice(7));
 
-    // Promo
+    // Referral / Promo
+    if (data === 'referral_info') return handleReferralInfo(ctx);
     if (data === 'promo_enter') return handlePromoEnterStart(ctx);
 
     // Favorites
     if (data.startsWith('fav_toggle:')) return handleFavoriteToggle(ctx, data.slice(11));
-    if (data.startsWith('fav_page:')) {
-      const page = parseInt(data.slice(9));
-      return handleViewFavorites(ctx, page);
-    }
+    if (data.startsWith('fav_page:')) return handleViewFavorites(ctx, parseInt(data.slice(9)));
     if (data === 'fav_add_all_cart') return handleAddAllFavoritesToCart(ctx);
 
     // Reviews
@@ -266,14 +277,14 @@ bot.on('callback_query', async (ctx) => {
     if (data === 'review_cancel') {
       await ctx.answerCbQuery();
       setSession(ctx.from.id, { step: null });
-      return ctx.editMessageText('❌ Bekor qilindi.');
+      return ctx.editMessageText(t(lang, 'reviewCancelled'));
     }
     if (data.startsWith('view_reviews:')) return handleViewProductReviews(ctx, data.slice(13));
 
     // Recently viewed
     if (data === 'recently_viewed') return handleRecentlyViewed(ctx);
 
-    // Price / Stock alerts
+    // Alerts
     if (data.startsWith('price_alert:')) return handlePriceAlertSubscribe(ctx, data.slice(12));
     if (data.startsWith('stock_alert:')) return handleStockAlertSubscribe(ctx, data.slice(12));
 
@@ -300,17 +311,16 @@ bot.on('callback_query', async (ctx) => {
       return handleOrderRatingSave(ctx, orderId, stars);
     }
 
-    // Main menu
+    // Main menu / subscription
     if (data === 'check_sub') return handleCheckSub(ctx);
-
     if (data === 'main_menu') {
       await ctx.answerCbQuery();
-      const { mainMenuV2 } = require('./utils/keyboards');
-      return ctx.reply('Bosh menyu:', mainMenuV2());
+      const { mainMenu } = require('./utils/keyboards');
+      return ctx.reply(t(lang, 'mainMenuTitle'), mainMenu(lang));
     }
 
-    // ── ADMIN CALLBACKS ──────────────────────────────────────────────────────
-    if (!isAdmin(ctx)) return ctx.answerCbQuery('❌ Ruxsat yo\'q');
+    // ── ADMIN CALLBACKS ──
+    if (!isAdmin(ctx)) return ctx.answerCbQuery(t(lang, 'noAccess'));
 
     if (data === 'admin_dashboard') return handleAdminDashboard(ctx);
     if (data.startsWith('admin_orders:')) return handleAdminOrders(ctx, data.slice(13));
@@ -322,7 +332,6 @@ bot.on('callback_query', async (ctx) => {
     if (data === 'admin_customers') return handleAdminCustomers(ctx);
     if (data === 'admin_stats') return handleAdminStats(ctx);
 
-    // Order status updates
     if (data.startsWith('admin_confirm:')) return updateOrderStatus(ctx, data.slice(14), 'confirmed');
     if (data.startsWith('admin_cancel:')) return updateOrderStatus(ctx, data.slice(13), 'cancelled');
     if (data.startsWith('admin_ship:')) return updateOrderStatus(ctx, data.slice(11), 'shipped');
@@ -330,20 +339,20 @@ bot.on('callback_query', async (ctx) => {
     if (data.startsWith('admin_pay_ok:')) return handlePaymentApprove(ctx, data.slice(13), true);
     if (data.startsWith('admin_pay_fail:')) return handlePaymentApprove(ctx, data.slice(15), false);
 
-    // Admin category stats
     if (data === 'admin_cat_stats') {
       const { getCollection } = require('./services/firebase');
       const [cats, prods] = await Promise.all([getCollection('categories'), getCollection('products')]);
       const text = '📊 *Kategoriyalar:*\n\n' +
         cats.map(c => `${c.icon || '📦'} ${c.name}: ${prods.filter(p => p.category === c.id).length} ta mahsulot`).join('\n');
       await ctx.answerCbQuery();
-      return ctx.editMessageText(text, { parse_mode: 'Markdown', ...require('telegraf').Markup.inlineKeyboard([[require('telegraf').Markup.button.callback('🔙', 'admin_products')]]) });
+      const { Markup } = require('telegraf');
+      return ctx.editMessageText(text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙', 'admin_products')]]) });
     }
 
     await ctx.answerCbQuery();
   } catch (e) {
     console.error('Callback error:', e.message);
-    try { await ctx.answerCbQuery('❌ Xatolik yuz berdi'); } catch { }
+    try { await ctx.answerCbQuery(t(langOf(ctx), 'errorShort')); } catch { }
   }
 });
 
@@ -351,11 +360,11 @@ bot.on('callback_query', async (ctx) => {
 bot.catch((err, ctx) => {
   console.error('Bot xatosi:', err.message);
   try {
-    ctx.reply('❌ Xatolik yuz berdi. Iltimos qayta urinib ko\'ring.').catch(() => { });
+    ctx.reply(t(langOf(ctx), 'error')).catch(() => { });
   } catch { }
 });
 
-// ── EXPRESS SERVER (for Railway + Webhook) ────────────────────────────────────
+// ── EXPRESS SERVER (Railway + Webhook) ────────────────────────────────────────
 const app = express();
 app.use(express.json());
 
@@ -363,35 +372,17 @@ const PORT = process.env.PORT || 3000;
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
 if (WEBHOOK_URL && process.env.NODE_ENV === 'production') {
-  // Webhook mode (Railway)
   app.use(bot.webhookCallback('/webhook'));
   app.get('/', (req, res) => res.send('🏗️ BoomStroy Bot ishlayapti!'));
   app.get('/health', (req, res) => res.json({ status: 'ok', bot: 'BoomStroy', time: new Date() }));
 
-  // Simple admin info page
   app.get('/admin', (req, res) => {
-    res.send(`
-      <!DOCTYPE html>
-      <html lang="uz">
-      <head><meta charset="UTF-8"><title>BoomStroy Bot</title>
+    res.send(`<!DOCTYPE html><html lang="uz"><head><meta charset="UTF-8"><title>BoomStroy Bot</title>
       <style>body{font-family:sans-serif;max-width:600px;margin:40px auto;padding:20px;background:#f1f5f9}
       .card{background:#fff;border-radius:12px;padding:24px;box-shadow:0 2px 8px rgba(0,0,0,.1);margin-bottom:16px}
       h1{color:#1a56db}a.btn{background:#1a56db;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;display:inline-block;margin-top:8px}</style>
-      </head>
-      <body>
-        <div class="card">
-          <h1>🏗️ BoomStroy Bot</h1>
-          <p>✅ Bot faol va ishlayapti!</p>
-          <p>📊 Admin panel uchun asosiy HTML faylni ishlating yoki Telegram botdan foydalaning.</p>
-          <a class="btn" href="https://t.me/${(process.env.BOT_TOKEN || '').split(':')[0]}">📱 Botga o'tish</a>
-        </div>
-        <div class="card">
-          <h2>📡 Webhook holati</h2>
-          <p>URL: ${WEBHOOK_URL}/webhook</p>
-          <p>Bot: @BoomStroyBot</p>
-        </div>
-      </body></html>
-    `);
+      </head><body><div class="card"><h1>🏗️ BoomStroy Bot</h1><p>✅ Bot faol va ishlayapti!</p>
+      <a class="btn" href="${SITE_URL}">🌐 Saytga o'tish</a></div></body></html>`);
   });
 
   app.listen(PORT, async () => {
@@ -405,13 +396,10 @@ if (WEBHOOK_URL && process.env.NODE_ENV === 'production') {
     startCrons();
   });
 } else {
-  // Long polling mode (local development)
   app.get('/health', (req, res) => res.json({ status: 'ok' }));
   app.listen(PORT, () => console.log(`Server port ${PORT} da`));
 
-  bot.launch({
-    allowedUpdates: ['message', 'callback_query', 'my_chat_member'],
-  }).then(() => {
+  bot.launch({ allowedUpdates: ['message', 'callback_query', 'my_chat_member'] }).then(() => {
     console.log('✅ BoomStroy Bot polling rejimida ishlamoqda...');
     startCrons();
   });

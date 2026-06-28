@@ -5,6 +5,8 @@ const WAREHOUSE = {
   lat: parseFloat(process.env.WAREHOUSE_LAT || '41.299496'),
   lng: parseFloat(process.env.WAREHOUSE_LNG || '69.240073'),
   name: process.env.WAREHOUSE_NAME || 'Asosiy Ombor (Toshkent)',
+  address: process.env.WAREHOUSE_ADDRESS || '',
+  phone: process.env.WAREHOUSE_PHONE || '',
 };
 
 const BASE_FEE = parseInt(process.env.BASE_DELIVERY_FEE || '10000');
@@ -135,14 +137,16 @@ function calcDeliveryFee(distanceKm, orderCount = 1) {
     multiplier,
     total,
     breakdown: `${fmtNum(baseFee)} + ${fmtNum(distanceFee)} (${distanceKm.toFixed(1)} km × ${fmtNum(PER_KM)})`,
-    discount: multiplier < 1 ? `${Math.round((1 - multiplier) * 100)}% chegirma (${orderCount} buyurtma)` : null,
+    discountPercent: multiplier < 1 ? Math.round((1 - multiplier) * 100) : 0,
+    orderCount,
   };
 }
 
 /**
  * To'liq yetkazib berish tekshiruvi va narx hisoblash
  */
-async function checkDelivery(lat, lng, orderCount = 1) {
+async function checkDelivery(lat, lng, orderCount = 1, lang = 'uz') {
+  const { t } = require('../utils/i18n');
   // Manzilni olish
   const geoInfo = await reverseGeocode(lat, lng);
 
@@ -154,7 +158,7 @@ async function checkDelivery(lat, lng, orderCount = 1) {
       restricted: true,
       reason: restriction.reason,
       address: geoInfo.display,
-      message: `❌ Kechirasiz, "${restriction.reason}" hududiga yetkazib berish xizmati mavjud emas.\n\nBiz faqat Toshkent va yaqin atrofiga (${MAX_KM} km) yetkazib beramiz.`,
+      message: t(lang, 'deliveryRestricted', { zone: escapeMd(restriction.reason), maxkm: MAX_KM }),
     };
   }
 
@@ -170,7 +174,10 @@ async function checkDelivery(lat, lng, orderCount = 1) {
       tooFar: true,
       address: geoInfo.display,
       distance: parseFloat(distance.toFixed(2)),
-      message: `❌ ${fee.error}\n\n📍 Manzilingiz: ${escapeMd(geoInfo.city || geoInfo.district)}\n🏭 Ombor: ${escapeMd(WAREHOUSE.name)}`,
+      message: t(lang, 'deliveryTooFar', {
+        maxkm: MAX_KM, dist: distance.toFixed(1),
+        city: escapeMd(geoInfo.city || geoInfo.district), wh: escapeMd(WAREHOUSE.name),
+      }),
     };
   }
 
@@ -182,7 +189,8 @@ async function checkDelivery(lat, lng, orderCount = 1) {
     distance: fee.distanceKm,
     deliveryFee: fee.total,
     breakdown: fee.breakdown,
-    discount: fee.discount,
+    discountPercent: fee.discountPercent,
+    orderCount: fee.orderCount,
     warehouse: WAREHOUSE.name,
     mapsLink: `https://www.google.com/maps?q=${lat},${lng}`,
     yandexLink: `https://yandex.uz/maps/?pt=${lng},${lat}&z=15`,

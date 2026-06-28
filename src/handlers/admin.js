@@ -167,16 +167,27 @@ async function updateOrderStatus(ctx, orderId, newStatus) {
     await addLog('order', `Bekor: ${order.orderNumber} — mahsulotlar qaytarildi`);
   }
 
-  const { escapeMarkdown } = require('../utils/helpers');
+  // Mijozga uning tilida xabar yuborish
+  const { t, normalizeLang } = require('../utils/i18n');
+  const isPickup = order.deliveryType === 'pickup';
+  let custLang = normalizeLang(order.lang);
+  try {
+    const cu = await queryDocs('telegramUsers', 'telegramId', '==', String(order.telegramId));
+    if (cu[0]?.lang) custLang = normalizeLang(cu[0].lang);
+  } catch { }
+  const som = t(custLang, 'som');
+  const vars = {
+    num: order.orderNumber, grand: fmtNum(order.grandTotal), som,
+    city: order.deliveryCity || order.deliveryAddress,
+    wh: order.pickupWarehouseName || order.deliveryAddress,
+  };
   const statusMessages = {
-    confirmed: `✅ *Buyurtma tasdiqlandi!*\n\n📋 ${order.orderNumber}\n💰 ${fmtNum(order.grandTotal)} so'm\n\n🔧 Mahsulotlar tayyorlanmoqda...`,
-    processing: `🔧 *Mahsulotlar tayyorlanmoqda*\n\n📋 ${order.orderNumber}`,
-    shipped: `🚚 *Buyurtma yo'lga chiqdi!*\n\n📋 ${order.orderNumber}\n📍 ${escapeMarkdown(order.deliveryCity || order.deliveryAddress)}\n\n_Tez orada yetib boradi!_`,
-    delivered: `✅ *Buyurtma yetkazildi!*\n\n📋 ${order.orderNumber}\n💰 ${fmtNum(order.grandTotal)} so'm\n\n⭐ BoomStroy ni tanlaganingiz uchun rahmat!`,
-    cancelled: `❌ *Buyurtma bekor qilindi*\n\n📋 ${order.orderNumber}\n\nSabab bo'yicha murojaat qiling.`,
+    confirmed: t(custLang, 'notifyConfirmed', vars),
+    shipped: isPickup ? t(custLang, 'notifyReadyPickup', vars) : t(custLang, 'notifyShipped', vars),
+    delivered: t(custLang, 'notifyDelivered', vars),
+    cancelled: t(custLang, 'notifyCancelled', vars),
   };
 
-  // Notify customer
   const customerMsg = statusMessages[newStatus];
   if (customerMsg && order.telegramId) {
     try {
@@ -184,6 +195,13 @@ async function updateOrderStatus(ctx, orderId, newStatus) {
     } catch (e) {
       console.error('Customer notify error:', e.message);
     }
+  }
+  // Yetkazib berilganda baholash so'rovi
+  if (newStatus === 'delivered' && order.telegramId) {
+    try {
+      const { handleOrderRatingRequest } = require('./loyalty');
+      await handleOrderRatingRequest(ctx, order.telegramId, orderId, order.orderNumber);
+    } catch { }
   }
 
   await ctx.editMessageText(
@@ -197,20 +215,22 @@ async function handlePaymentApprove(ctx, orderId, approved) {
   const order = await getDoc('orders', orderId);
   if (!order) return;
 
+  const { t, normalizeLang } = require('../utils/i18n');
+  let custLang = normalizeLang(order.lang);
+  try {
+    const cu = await queryDocs('telegramUsers', 'telegramId', '==', String(order.telegramId));
+    if (cu[0]?.lang) custLang = normalizeLang(cu[0].lang);
+  } catch { }
+  const vars = { num: order.orderNumber, grand: fmtNum(order.grandTotal), som: t(custLang, 'som') };
+
   if (approved) {
     await updateDoc('orders', orderId, { status: 'confirmed', paymentStatus: 'paid' });
-    await ctx.telegram.sendMessage(order.telegramId,
-      `✅ *To'lovingiz tasdiqlandi!*\n\n📋 ${order.orderNumber}\n💰 ${fmtNum(order.grandTotal)} so'm\n\nBuyurtmangiz tayyorlanmoqda! 🔧`,
-      { parse_mode: 'Markdown' }
-    ).catch(() => { });
+    await ctx.telegram.sendMessage(order.telegramId, t(custLang, 'notifyPayOk', vars), { parse_mode: 'Markdown' }).catch(() => { });
     await ctx.editMessageText('✅ To\'lov tasdiqlandi. Buyurtma holatiga o\'tkazildi.',
       Markup.inlineKeyboard([[Markup.button.callback('📋 Buyurtmalar', 'admin_orders:all')]]))
   } else {
     await updateDoc('orders', orderId, { status: 'cancelled', paymentStatus: 'rejected' });
-    await ctx.telegram.sendMessage(order.telegramId,
-      `❌ *To'lovingiz tasdiqlanmadi*\n\n📋 ${order.orderNumber}\n\nIltimos, qayta to'lov qiling yoki bog'laning.`,
-      { parse_mode: 'Markdown' }
-    ).catch(() => { });
+    await ctx.telegram.sendMessage(order.telegramId, t(custLang, 'notifyPayFail', vars), { parse_mode: 'Markdown' }).catch(() => { });
     await ctx.editMessageText('❌ To\'lov rad etildi.',
       Markup.inlineKeyboard([[Markup.button.callback('📋 Buyurtmalar', 'admin_orders:all')]]))
   }

@@ -48,17 +48,11 @@ function paymentLabel(p) {
   return map[p] || p || '-';
 }
 
-function orderStatusLabel(s) {
-  const map = {
-    pending: '⏳ Kutilmoqda',
-    confirmed: '✅ Tasdiqlangan',
-    processing: '🔧 Tayyorlanmoqda',
-    shipped: '🚚 Yo\'lda',
-    delivered: '✅ Yetkazildi',
-    cancelled: '❌ Bekor qilindi',
-    paid: '💳 To\'langan',
-  };
-  return map[s] || s || '-';
+function orderStatusLabel(s, lang = 'uz') {
+  const { t } = require('./i18n');
+  const known = ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled', 'paid', 'paid_pending'];
+  if (known.includes(s)) return t(lang, 'st_' + s);
+  return s || '-';
 }
 
 function escapeMarkdown(text) {
@@ -89,25 +83,28 @@ function parseCoords(text) {
 
 // ─── LOYALTY / BONUS / REFERAL YORDAMCHI FUNKSIYALARI ────────────────────────
 
-// Har xarid summasidan necha foiz bonus ball beriladi
-const LOYALTY_EARN_RATE = parseFloat(process.env.LOYALTY_EARN_RATE || '0.02'); // 2%
-// 1 ball necha so'mga teng (sarflashda)
-const LOYALTY_POINT_VALUE = parseInt(process.env.LOYALTY_POINT_VALUE || '1');
-// Referal taklif qilgan kishiga necha ball beriladi
-const REFERRAL_BONUS_POINTS = parseInt(process.env.REFERRAL_BONUS_POINTS || '5000');
-// Referal qabul qilgan (yangi) kishiga necha ball beriladi
-const REFERRAL_WELCOME_POINTS = parseInt(process.env.REFERRAL_WELCOME_POINTS || '2000');
+// Ball iqtisodiyoti:  100 ball = 1 000 so'm  →  1 ball = 10 so'm
+// 1 ball necha so'mga teng (sarflashda / sovg'a narxida)
+const LOYALTY_POINT_VALUE = parseInt(process.env.LOYALTY_POINT_VALUE || '10');
+// Har xarid summasidan ball ko'rinishidagi qaytim koeffitsienti.
+// 0.002 × 10 so'm = ~2% naqd qiymatli cashback.
+const LOYALTY_EARN_RATE = parseFloat(process.env.LOYALTY_EARN_RATE || '0.002');
+// Referal taklif qilgan kishiga necha ball beriladi (500 ball = 5 000 so'm)
+const REFERRAL_BONUS_POINTS = parseInt(process.env.REFERRAL_BONUS_POINTS || '500');
+// Referal qabul qilgan (yangi) kishiga necha ball beriladi (200 ball = 2 000 so'm)
+const REFERRAL_WELCOME_POINTS = parseInt(process.env.REFERRAL_WELCOME_POINTS || '200');
 
 function calcEarnedPoints(orderTotal) {
   return Math.floor((orderTotal || 0) * LOYALTY_EARN_RATE);
 }
 
+// Tier obyektida `key` — i18n nomi (tier_new, tier_bronze, ...), `nextKey` — keyingi daraja kaliti
 function getLoyaltyTier(totalSpent = 0) {
-  if (totalSpent >= 50000000) return { name: "💎 Olmos", icon: '💎', discount: 7, next: null, nextAt: null };
-  if (totalSpent >= 20000000) return { name: '🥇 Oltin', icon: '🥇', discount: 5, next: '💎 Olmos', nextAt: 50000000 };
-  if (totalSpent >= 5000000) return { name: '🥈 Kumush', icon: '🥈', discount: 3, next: '🥇 Oltin', nextAt: 20000000 };
-  if (totalSpent >= 1000000) return { name: '🥉 Bronza', icon: '🥉', discount: 1, next: '🥈 Kumush', nextAt: 5000000 };
-  return { name: '🆕 Yangi', icon: '🆕', discount: 0, next: '🥉 Bronza', nextAt: 1000000 };
+  if (totalSpent >= 50000000) return { key: 'tier_diamond', icon: '💎', discount: 7, nextKey: null, nextAt: null };
+  if (totalSpent >= 20000000) return { key: 'tier_gold', icon: '🥇', discount: 5, nextKey: 'tier_diamond', nextAt: 50000000 };
+  if (totalSpent >= 5000000) return { key: 'tier_silver', icon: '🥈', discount: 3, nextKey: 'tier_gold', nextAt: 20000000 };
+  if (totalSpent >= 1000000) return { key: 'tier_bronze', icon: '🥉', discount: 1, nextKey: 'tier_silver', nextAt: 5000000 };
+  return { key: 'tier_new', icon: '🆕', discount: 0, nextKey: 'tier_bronze', nextAt: 1000000 };
 }
 
 function generateReferralCode(telegramId) {

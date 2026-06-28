@@ -1,172 +1,155 @@
 const { queryDocs, updateDoc } = require('../services/firebase');
 const { getSession, setSession } = require('../services/session');
-const { fmtNum, fmtDate } = require('../utils/helpers');
-const { mainMenu, sharePhoneButton } = require('../utils/keyboards');
+const { fmtNum, fmtDate, escapeMarkdown } = require('../utils/helpers');
+const { mainMenu, sharePhoneButton, sendLocationButton } = require('../utils/keyboards');
+const { t, langOf, SITE_URL } = require('../utils/i18n');
 const { Markup } = require('telegraf');
-const { checkDelivery } = require('../services/delivery');
-const { WAREHOUSE, BASE_FEE, PER_KM, MAX_KM, RESTRICTED_KEYWORDS } = require('../services/delivery');
+const { checkDelivery, WAREHOUSE, BASE_FEE, PER_KM, MAX_KM } = require('../services/delivery');
+
+const SUPPORT_PHONE = process.env.SUPPORT_PHONE || '+998 94 217 10 10';
+const SUPPORT_USERNAME = process.env.SUPPORT_USERNAME || '@boomstroy_support';
+const EMAIL = process.env.SUPPORT_EMAIL || 'info@boomstroy.uz';
+const BOT_USERNAME = '@' + (process.env.BOT_USERNAME || 'BoomStroyBot').replace('@', '');
 
 async function handleProfile(ctx) {
+  const lang = langOf(ctx);
   const tgId = String(ctx.from.id);
   const users = await queryDocs('telegramUsers', 'telegramId', '==', tgId);
   const user = users[0];
-
-  if (!user) return ctx.reply('Ro\'yxatdan o\'tmadingiz. /start bosing.');
+  if (!user) return ctx.reply(t(lang, 'pressStart'));
 
   const orders = await queryDocs('orders', 'telegramId', '==', tgId);
   const delivered = orders.filter(o => o.status === 'delivered');
-  const { escapeMarkdown } = require('../utils/helpers');
 
-  const text =
-    `👤 *Profilim*\n\n` +
-    `Ism: *${escapeMarkdown(user.firstName)} ${escapeMarkdown(user.lastName || '')}*\n` +
-    `📱 Telefon: ${user.phone || 'Belgilanmagan'}\n` +
-    `🆔 ID: ${user.telegramId}\n\n` +
-    `📋 Jami buyurtmalar: *${orders.length}*\n` +
-    `✅ Yetkazilgan: *${delivered.length}*\n` +
-    `💰 Jami xarid: *${fmtNum(user.totalSpent || 0)} so'm*\n\n` +
-    `📅 Ro'yxatdan: ${fmtDate(user.createdAt)}`;
+  const text = t(lang, 'profileTitle', {
+    name: `${escapeMarkdown(user.firstName)} ${escapeMarkdown(user.lastName || '')}`.trim(),
+    phone: user.phone || t(lang, 'phoneNotSet'),
+    id: user.telegramId,
+    orders: orders.length,
+    delivered: delivered.length,
+    spent: fmtNum(user.totalSpent || 0),
+    points: fmtNum(user.loyaltyPoints || 0),
+    som: t(lang, 'som'),
+    date: fmtDate(user.createdAt),
+  });
 
   const kb = Markup.inlineKeyboard([
-    [Markup.button.callback('📋 Buyurtmalarim', 'my_orders')],
-    [Markup.button.callback('📱 Raqamni o\'zgartirish', 'change_phone')],
+    [Markup.button.callback(t(lang, 'btnMyOrders'), 'my_orders')],
+    [Markup.button.callback(t(lang, 'btnChangePhone'), 'change_phone')],
   ]);
 
   await ctx.reply(text, { parse_mode: 'Markdown', ...kb });
 }
 
 async function handleChangePhone(ctx) {
+  const lang = langOf(ctx);
   if (ctx.callbackQuery) await ctx.answerCbQuery();
   setSession(ctx.from.id, { step: 'change_phone' });
-  await ctx.reply('📱 Yangi telefon raqamingizni ulashing:', sharePhoneButton());
+  await ctx.reply(t(lang, 'changePhonePrompt'), sharePhoneButton(lang));
 }
 
 async function handleUpdatePhone(ctx) {
+  const lang = langOf(ctx);
   const s = getSession(ctx.from.id);
   if (s.step !== 'change_phone') return;
 
   const phone = ctx.message.contact?.phone_number;
-  if (!phone) return ctx.reply('Iltimos, tugmani bosib raqam ulashing.');
+  if (!phone) return ctx.reply(t(lang, 'phoneShareHint'));
 
   const tgId = String(ctx.from.id);
   const users = await queryDocs('telegramUsers', 'telegramId', '==', tgId);
   if (users[0]) await updateDoc('telegramUsers', users[0].id, { phone });
 
   setSession(ctx.from.id, { step: null });
-  await ctx.reply('✅ Telefon raqami yangilandi!', { reply_markup: { remove_keyboard: true } });
-  await ctx.reply('Bosh menyu:', mainMenu());
+  await ctx.reply(t(lang, 'phoneUpdated'), { reply_markup: { remove_keyboard: true } });
+  await ctx.reply(t(lang, 'mainMenuTitle'), mainMenu(lang));
 }
 
 async function handleDeliveryInfo(ctx) {
-  const { escapeMarkdown } = require('../utils/helpers');
-  const text =
-    `🚚 *Yetkazib Berish Ma'lumotlari*\n\n` +
-    `🏭 Ombor: ${escapeMarkdown(WAREHOUSE.name)}\n\n` +
-    `💰 *Narx:*\n` +
-    `• Boshlang'ich: ${fmtNum(BASE_FEE)} so'm\n` +
-    `• + Har km uchun: ${fmtNum(PER_KM)} so'm\n` +
-    `• Maksimal masofa: ${MAX_KM} km\n\n` +
-    `📦 *Ko'p buyurtmada chegirma:*\n` +
-    `• 3+ buyurtma: 5% chegirma\n` +
-    `• 5+ buyurtma: 10% chegirma\n` +
-    `• 10+ buyurtma: 15% chegirma\n\n` +
-    `❌ *Yetkazib berilmaydigan hududlar:*\n` +
-    `• Bo'ka tumani\n` +
-    `• 50 km dan uzoq hududlar\n` +
-    `• Viloyat markazlaridan uzoq qishloqlar\n\n` +
-    `⏰ *Yetkazish vaqti:*\n` +
-    `• 0–10 km: 1–2 soat\n` +
-    `• 10–30 km: 2–4 soat\n` +
-    `• 30–50 km: 4–8 soat\n\n` +
-    `📞 Savol: @boomstroy\\_support`;
-
+  const lang = langOf(ctx);
+  const text = t(lang, 'deliveryInfo', {
+    wh: WAREHOUSE.name,
+    base: fmtNum(BASE_FEE),
+    perkm: fmtNum(PER_KM),
+    maxkm: MAX_KM,
+    som: t(lang, 'som'),
+    support: SUPPORT_USERNAME,
+  });
   const kb = Markup.inlineKeyboard([
-    [Markup.button.callback('📍 Manzilimni tekshirish', 'check_my_location')],
+    [Markup.button.callback(t(lang, 'btnCheckMyAddress'), 'check_my_location')],
   ]);
   await ctx.reply(text, { parse_mode: 'Markdown', ...kb });
 }
 
 async function handleCheckMyLocation(ctx) {
+  const lang = langOf(ctx);
   if (ctx.callbackQuery) await ctx.answerCbQuery();
   setSession(ctx.from.id, { step: 'check_location_only' });
-  const { sendLocationButton } = require('../utils/keyboards');
-  await ctx.reply('📍 Joylashuvingizni yuboring — yetkazib berish narxini hisoblayman:', sendLocationButton());
+  await ctx.reply(t(lang, 'checkAddrPrompt'), sendLocationButton(lang));
 }
 
 async function handleLocationCheckOnly(ctx) {
+  const lang = langOf(ctx);
   const s = getSession(ctx.from.id);
   if (s.step !== 'check_location_only') return;
 
   const { latitude: lat, longitude: lng } = ctx.message.location;
   setSession(ctx.from.id, { step: null });
 
-  await ctx.reply('⏳ Tekshirilmoqda...', { reply_markup: { remove_keyboard: true } });
-  const result = await checkDelivery(lat, lng, 1);
+  await ctx.reply(t(lang, 'checking'), { reply_markup: { remove_keyboard: true } });
+  const result = await checkDelivery(lat, lng, 1, lang);
 
   if (!result.success) {
-    await ctx.reply(result.message, { parse_mode: 'Markdown', ...mainMenu() });
+    await ctx.reply(result.message, { parse_mode: 'Markdown', ...mainMenu(lang) });
   } else {
-    const { escapeMarkdown } = require('../utils/helpers');
-    const text =
-      `✅ *Yetkazib beriladi!*\n\n` +
-      `📍 Manzil: ${escapeMarkdown(result.city || result.address)}\n` +
-      `📏 Masofa: ${result.distance} km\n\n` +
-      `💰 *Yetkazib berish narxi:*\n` +
-      `${fmtNum(result.deliveryFee)} so'm\n` +
-      `(${escapeMarkdown(result.breakdown)})\n\n` +
-      `🗺️ [Google Maps](${result.mapsLink})`;
-    await ctx.reply(text, { parse_mode: 'Markdown', disable_web_page_preview: true, ...mainMenu() });
+    const text = t(lang, 'deliverableMsg', {
+      city: result.city || result.address,
+      dist: result.distance,
+      fee: fmtNum(result.deliveryFee),
+      breakdown: result.breakdown,
+      maps: result.mapsLink,
+      som: t(lang, 'som'),
+    });
+    await ctx.reply(text, { parse_mode: 'Markdown', disable_web_page_preview: true, ...mainMenu(lang) });
   }
 }
 
-async function handleContact(ctx) {
-  const { escapeMarkdown } = require('../utils/helpers');
-  const text =
-    `📞 *Biz bilan bog'laning*\n\n` +
-    `📱 Telefon: +998 94 217 10 10\n` +
-    `💬 Telegram: @boomstroy\\_support\n` +
-    `📧 Email: info@boomstroy.uz\n` +
-    `📍 Manzil: ${escapeMarkdown(WAREHOUSE.name)}\n\n` +
-    `⏰ Ish vaqti:\n` +
-    `Du–Sh: 09:00 – 18:00\n` +
-    `Yak: 10:00 – 15:00`;
+// Joriy lokatsiyani aniqlash uchun (faqat tekshiruv emas, asosiy buyurtma oqimida ham foydalaniladi)
+async function handleLocationCheckOnlyAlias(ctx) { return handleLocationCheckOnly(ctx); }
 
-  await ctx.reply(text, { parse_mode: 'Markdown', ...mainMenu() });
+async function handleContact(ctx) {
+  const lang = langOf(ctx);
+  const text = t(lang, 'contactInfo', {
+    phone: SUPPORT_PHONE,
+    support: SUPPORT_USERNAME,
+    email: EMAIL,
+    site: SITE_URL,
+    wh: WAREHOUSE.name,
+  });
+  await ctx.reply(text, { parse_mode: 'Markdown', disable_web_page_preview: true, ...mainMenu(lang) });
 }
 
 async function handleAbout(ctx) {
-  const text =
-    `🏗️ *BoomStroy Haqida*\n\n` +
-    `BoomStroy — Toshkentdagi yetakchi qurilish materiallari do'koni.\n\n` +
-    `✅ *Afzalliklarimiz:*\n` +
-    `• 10 yildan ortiq tajriba\n` +
-    `• 5000+ mahsulot assortimenti\n` +
-    `• Sifat kafolati\n` +
-    `• Tez yetkazib berish\n` +
-    `• Eng arzon narxlar\n\n` +
-    `🌐 Sayt: shop.boom-stroy.netlify.app\n` +
-    `📱 Bot: @BoomStroyBot`;
-
-  await ctx.reply(text, { parse_mode: 'Markdown', ...mainMenu() });
+  const lang = langOf(ctx);
+  const text = t(lang, 'aboutInfo', { site: SITE_URL, bot: BOT_USERNAME });
+  await ctx.reply(text, { parse_mode: 'Markdown', disable_web_page_preview: true, ...mainMenu(lang) });
 }
 
 async function handleSales(ctx) {
-  const text =
-    `⭐ *Aksiyalar va Chegirmalar*\n\n` +
-    `🎁 *Faol aksiyalar:*\n` +
-    `• 3+ mahsulot — 5% chegirma\n` +
-    `• 5+ mahsulot — 10% chegirma\n` +
-    `• 10+ mahsulot — 15% chegirma\n\n` +
-    `🚚 *Yetkazib berish chegirmasi:*\n` +
-    `• Ko'p buyurtmada kumulyativ chegirma\n\n` +
-    `📢 Yangi aksiyalar uchun kanalimizga a'zo bo'ling!\n` +
-    `👉 @boomstroy\\_channel`;
+  const lang = langOf(ctx);
+  const text = t(lang, 'salesInfo', { som: t(lang, 'som') });
+  await ctx.reply(text, { parse_mode: 'Markdown', ...mainMenu(lang) });
+}
 
-  await ctx.reply(text, { parse_mode: 'Markdown', ...mainMenu() });
+// "Bizning sayt" tugmasi
+async function handleWebsite(ctx) {
+  const lang = langOf(ctx);
+  const { websiteButton } = require('../utils/keyboards');
+  await ctx.reply(t(lang, 'websiteTitle'), { parse_mode: 'Markdown', disable_web_page_preview: true, ...websiteButton(lang) });
 }
 
 module.exports = {
   handleProfile, handleChangePhone, handleUpdatePhone,
   handleDeliveryInfo, handleCheckMyLocation, handleLocationCheckOnly,
-  handleContact, handleAbout, handleSales,
+  handleContact, handleAbout, handleSales, handleWebsite,
 };
