@@ -2,15 +2,15 @@ const { Markup } = require('telegraf');
 const { t, SITE_URL } = require('./i18n');
 
 // ─── ASOSIY MENYU (foydalanuvchi) ────────────────────────────────────────────
-// "Bizning sayt" eng tepada, "Borib olish" alohida tugma sifatida.
+// "Bizning sayt" va "Borib olish" eng tepada yonma-yon turadi.
 const mainMenu = (lang = 'uz') => Markup.keyboard([
-  [t(lang, 'm_website')],
+  [t(lang, 'm_website'), t(lang, 'm_pickup')],
   [t(lang, 'm_products'), t(lang, 'm_cart')],
   [t(lang, 'm_orders'), t(lang, 'm_profile')],
   [t(lang, 'm_favorites'), t(lang, 'm_loyalty')],
-  [t(lang, 'm_delivery'), t(lang, 'm_pickup')],
-  [t(lang, 'm_contact'), t(lang, 'm_about')],
-  [t(lang, 'm_sales'), t(lang, 'm_language')],
+  [t(lang, 'm_delivery'), t(lang, 'm_contact')],
+  [t(lang, 'm_about'), t(lang, 'm_sales')],
+  [t(lang, 'm_language')],
 ]).resize();
 
 // Eski nom bilan ham chaqirilsa ishlashi uchun (alias)
