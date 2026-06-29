@@ -4,6 +4,7 @@ const express = require('express');
 const { initFirebase } = require('./services/firebase');
 const { authMiddleware } = require('./middlewares/auth');
 const { startCrons, setBotInstance } = require('./services/cron');
+const { startWatchers } = require('./services/watchers');
 const { getSession, setSession } = require('./services/session');
 const { t, langOf, variantsOf, SITE_URL } = require('./utils/i18n');
 
@@ -387,6 +388,7 @@ if (WEBHOOK_URL && process.env.NODE_ENV === 'production') {
       console.error('Webhook xatosi:', e.message);
     }
     startCrons();
+    startWatchers(bot);
   });
 } else {
   app.get('/health', (req, res) => res.json({ status: 'ok' }));
@@ -395,6 +397,7 @@ if (WEBHOOK_URL && process.env.NODE_ENV === 'production') {
   bot.launch({ allowedUpdates: ['message', 'callback_query', 'my_chat_member'] }).then(() => {
     console.log('✅ BoomStroy Bot polling rejimida ishlamoqda...');
     startCrons();
+    startWatchers(bot);
   });
 
   process.once('SIGINT', () => bot.stop('SIGINT'));
