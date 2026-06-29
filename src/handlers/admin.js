@@ -167,16 +167,27 @@ async function updateOrderStatus(ctx, orderId, newStatus) {
     await addLog('order', `Bekor: ${order.orderNumber} — mahsulotlar qaytarildi`);
   }
 
-  const { escapeMarkdown } = require('../utils/helpers');
+  // Mijozga uning tilida xabar yuborish
+  const { t, normalizeLang } = require('../utils/i18n');
+  const isPickup = order.deliveryType === 'pickup';
+  let custLang = normalizeLang(order.lang);
+  try {
+    const cu = await queryDocs('telegramUsers', 'telegramId', '==', String(order.telegramId));
+    if (cu[0]?.lang) custLang = normalizeLang(cu[0].lang);
+  } catch { }
+  const som = t(custLang, 'som');
+  const vars = {
+    num: order.orderNumber, grand: fmtNum(order.grandTotal), som,
+    city: order.deliveryCity || order.deliveryAddress,
+    wh: order.pickupWarehouseName || order.deliveryAddress,
+  };
   const statusMessages = {
-    confirmed: `✅ *Buyurtma tasdiqlandi!*\n\n📋 ${order.orderNumber}\n💰 ${fmtNum(order.grandTotal)} so'm\n\n🔧 Mahsulotlar tayyorlanmoqda...`,
-    processing: `🔧 *Mahsulotlar tayyorlanmoqda*\n\n📋 ${order.orderNumber}`,
-    shipped: `🚚 *Buyurtma yo'lga chiqdi!*\n\n📋 ${order.orderNumber}\n📍 ${escapeMarkdown(order.deliveryCity || order.deliveryAddress)}\n\n_Tez orada yetib boradi!_`,
-    delivered: `✅ *Buyurtma yetkazildi!*\n\n📋 ${order.orderNumber}\n💰 ${fmtNum(order.grandTotal)} so'm\n\n⭐ BoomStroy ni tanlaganingiz uchun rahmat!`,
-    cancelled: `❌ *Buyurtma bekor qilindi*\n\n📋 ${order.orderNumber}\n\nSabab bo'yicha murojaat qiling.`,
+    confirmed: t(custLang, 'notifyConfirmed', vars),
+    shipped: isPickup ? t(custLang, 'notifyReadyPickup', vars) : t(custLang, 'notifyShipped', vars),
+    delivered: t(custLang, 'notifyDelivered', vars),
+    cancelled: t(custLang, 'notifyCancelled', vars),
   };
 
-  // Notify customer
   const customerMsg = statusMessages[newStatus];
   if (customerMsg && order.telegramId) {
     try {
@@ -184,6 +195,13 @@ async function updateOrderStatus(ctx, orderId, newStatus) {
     } catch (e) {
       console.error('Customer notify error:', e.message);
     }
+  }
+  // Yetkazib berilganda baholash so'rovi
+  if (newStatus === 'delivered' && order.telegramId) {
+    try {
+      const { handleOrderRatingRequest } = require('./loyalty');
+      await handleOrderRatingRequest(ctx, order.telegramId, orderId, order.orderNumber);
+    } catch { }
   }
 
   await ctx.editMessageText(
@@ -197,20 +215,22 @@ async function handlePaymentApprove(ctx, orderId, approved) {
   const order = await getDoc('orders', orderId);
   if (!order) return;
 
+  const { t, normalizeLang } = require('../utils/i18n');
+  let custLang = normalizeLang(order.lang);
+  try {
+    const cu = await queryDocs('telegramUsers', 'telegramId', '==', String(order.telegramId));
+    if (cu[0]?.lang) custLang = normalizeLang(cu[0].lang);
+  } catch { }
+  const vars = { num: order.orderNumber, grand: fmtNum(order.grandTotal), som: t(custLang, 'som') };
+
   if (approved) {
     await updateDoc('orders', orderId, { status: 'confirmed', paymentStatus: 'paid' });
-    await ctx.telegram.sendMessage(order.telegramId,
-      `✅ *To'lovingiz tasdiqlandi!*\n\n📋 ${order.orderNumber}\n💰 ${fmtNum(order.grandTotal)} so'm\n\nBuyurtmangiz tayyorlanmoqda! 🔧`,
-      { parse_mode: 'Markdown' }
-    ).catch(() => { });
+    await ctx.telegram.sendMessage(order.telegramId, t(custLang, 'notifyPayOk', vars), { parse_mode: 'Markdown' }).catch(() => { });
     await ctx.editMessageText('✅ To\'lov tasdiqlandi. Buyurtma holatiga o\'tkazildi.',
       Markup.inlineKeyboard([[Markup.button.callback('📋 Buyurtmalar', 'admin_orders:all')]]))
   } else {
     await updateDoc('orders', orderId, { status: 'cancelled', paymentStatus: 'rejected' });
-    await ctx.telegram.sendMessage(order.telegramId,
-      `❌ *To'lovingiz tasdiqlanmadi*\n\n📋 ${order.orderNumber}\n\nIltimos, qayta to'lov qiling yoki bog'laning.`,
-      { parse_mode: 'Markdown' }
-    ).catch(() => { });
+    await ctx.telegram.sendMessage(order.telegramId, t(custLang, 'notifyPayFail', vars), { parse_mode: 'Markdown' }).catch(() => { });
     await ctx.editMessageText('❌ To\'lov rad etildi.',
       Markup.inlineKeyboard([[Markup.button.callback('📋 Buyurtmalar', 'admin_orders:all')]]))
   }
@@ -373,10 +393,87 @@ async function handleBroadcastMessage(ctx) {
   await ctx.reply(`✅ Jo'natildi: ${success}\n❌ Xato: ${failed}`, adminMainMenu());
 }
 
+// ─── OMBORLAR (borib olish manzillari) ────────────────────────────────────────
+async function handleAdminWarehouses(ctx) {
+  if (!isAdmin(ctx)) return;
+  if (ctx.callbackQuery) await ctx.answerCbQuery();
+
+  const { getCollection } = require('../services/firebase');
+  const { WAREHOUSE } = require('../services/delivery');
+  const warehouses = await getCollection('warehouses');
+  const products = await getCollection('products');
+
+  let text = '🏭 *Omborlar (borib olish manzillari)*\n\n';
+  text += `🏠 *Asosiy ombor:* ${WAREHOUSE.name}\n`;
+  if (WAREHOUSE.address) text += `📌 ${WAREHOUSE.address}\n`;
+  text += '\n';
+
+  if (!warehouses.length) {
+    text += `_Qo'shimcha omborlar yo'q. "➕ Ombor qo'shish" orqali qo'shing._\n`;
+  } else {
+    warehouses.forEach((w, i) => {
+      const cnt = products.filter(p => (p.warehouse || 'main') === w.id).length;
+      text += `${i + 1}. 🏪 *${w.name}*\n`;
+      if (w.address) text += `   📌 ${w.address}\n`;
+      if (w.phone) text += `   📞 ${w.phone}\n`;
+      text += `   📦 ${cnt} ta mahsulot\n`;
+    });
+  }
+  text += `\n_Bu omborlar foydalanuvchilarga "🏪 Borib olish" bo'limida ko'rinadi._`;
+
+  const rows = [[Markup.button.callback("➕ Ombor qo'shish", 'wh_add')]];
+  warehouses.forEach(w => rows.push([Markup.button.callback(`🗑️ ${w.name}`, `wh_del:${w.id}`)]));
+
+  if (ctx.callbackQuery) {
+    try { return ctx.editMessageText(text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(rows) }); } catch { }
+  }
+  await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(rows) });
+}
+
+async function handleWarehouseAddStart(ctx) {
+  if (!isAdmin(ctx)) return ctx.answerCbQuery('Ruxsat yo\'q');
+  await ctx.answerCbQuery();
+  setSession(ctx.from.id, { step: 'admin_wh_name', newWarehouse: {} });
+  await ctx.reply('🏪 Yangi ombor *nomini* yozing:\n\n_Masalan: Chilonzor filiali_', { parse_mode: 'Markdown' });
+}
+
+async function handleWarehouseInput(ctx) {
+  if (!isAdmin(ctx)) return;
+  const s = getSession(ctx.from.id);
+  const text = (ctx.message.text || '').trim();
+  const skip = text === '-' || text.toLowerCase() === 'skip';
+
+  if (s.step === 'admin_wh_name') {
+    setSession(ctx.from.id, { step: 'admin_wh_address', newWarehouse: { ...s.newWarehouse, name: text } });
+    return ctx.reply('📌 Ombor *manzilini* yozing (yoki "-" deb tashlab keting):', { parse_mode: 'Markdown' });
+  }
+  if (s.step === 'admin_wh_address') {
+    setSession(ctx.from.id, { step: 'admin_wh_phone', newWarehouse: { ...s.newWarehouse, address: skip ? '' : text } });
+    return ctx.reply('📞 Ombor *telefon raqamini* yozing (yoki "-"):', { parse_mode: 'Markdown' });
+  }
+  if (s.step === 'admin_wh_phone') {
+    const { addDoc } = require('../services/firebase');
+    const wh = { ...s.newWarehouse, phone: skip ? '' : text, active: true, pickup: true };
+    await addDoc('warehouses', wh);
+    setSession(ctx.from.id, { step: null, newWarehouse: null });
+    await ctx.reply(`✅ Ombor qo'shildi: *${wh.name}*\n\nEndi u "🏪 Borib olish" bo'limida ko'rinadi.`, { parse_mode: 'Markdown', ...adminMainMenu() });
+    return handleAdminWarehouses(ctx);
+  }
+}
+
+async function handleWarehouseDelete(ctx, id) {
+  if (!isAdmin(ctx)) return ctx.answerCbQuery('Ruxsat yo\'q');
+  const { deleteDocById } = require('../services/firebase');
+  await deleteDocById('warehouses', id).catch(() => { });
+  await ctx.answerCbQuery('🗑️ O\'chirildi');
+  return handleAdminWarehouses(ctx);
+}
+
 module.exports = {
   isAdmin,
   handleAdminDashboard, handleAdminOrders, handleAdminViewOrder,
   updateOrderStatus, handlePaymentApprove,
   handleAdminProducts, handleAdminLowStock, handleAdminCustomers,
   handleAdminStats, handleAdminBroadcast, handleBroadcastMessage,
+  handleAdminWarehouses, handleWarehouseAddStart, handleWarehouseInput, handleWarehouseDelete,
 };

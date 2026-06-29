@@ -1,7 +1,7 @@
 {
   "name": "boomstroy-telegram-bot",
-  "version": "2.0.0",
-  "description": "BoomStroy Inventar + Telegram Bot - Railway Ready",
+  "version": "3.0.0",
+  "description": "BoomStroy ko'p tilli (uz/uz-cyrl/ru/en) Telegram savdo boti — yetkazib berish, borib olish, bonus va sodiqlik tizimi",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

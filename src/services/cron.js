@@ -89,12 +89,11 @@ function startCrons() {
         const last = u.lastOrderAt?.toDate ? u.lastOrderAt.toDate().getTime() : 0;
         return u.phone && last && last < sevenDaysAgo && !u.isBlocked;
       });
+      const { t, normalizeLang } = require('../utils/i18n');
       for (const u of inactive.slice(0, 200)) {
         try {
-          await botInstance.telegram.sendMessage(
-            u.telegramId,
-            `👋 Sizni sog'indik!\n\n🎁 Qaytib kelganingiz uchun sizga maxsus bonus tayyorladik. "🎁 Bonus va Sodiqlik" bo'limini tekshiring!`,
-          ).catch(() => { });
+          const lang = normalizeLang(u.lang);
+          await botInstance.telegram.sendMessage(u.telegramId, t(lang, 'comeBack')).catch(() => { });
           await new Promise(r => setTimeout(r, 80));
         } catch { }
       }

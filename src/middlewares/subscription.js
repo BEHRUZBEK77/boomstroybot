@@ -1,7 +1,8 @@
 const { Markup } = require('telegraf');
+const { t, langOf } = require('../utils/i18n');
 
-const CHANNEL_USERNAME = '@boomstroyqurilishsavdo';
-const CHANNEL_LINK = 'https://t.me/boomstroyqurilishsavdo';
+const CHANNEL_USERNAME = process.env.CHANNEL_USERNAME || '@boomstroyqurilishsavdo';
+const CHANNEL_LINK = process.env.CHANNEL_LINK || 'https://t.me/boomstroyqurilishsavdo';
 
 async function checkSubscription(ctx) {
   try {
@@ -13,22 +14,15 @@ async function checkSubscription(ctx) {
 }
 
 async function sendSubscribePrompt(ctx) {
+  const lang = langOf(ctx);
   await ctx.reply(
-    `🏗️ *BoomStroy — Qurilish Materiallari*\n\n` +
-    `Assalomu alaykum! 👋\n\n` +
-    `🔔 Botdan foydalanish uchun avval rasmiy kanalimizga\n` +
-    `a'zo bo'lishingiz kerak!\n\n` +
-    `📢 *@boomstroyqurilishsavdo* kanalida:\n` +
-    `• 🏷️ Eng yangi narxlar va aksiyalar\n` +
-    `• 📦 Yangi mahsulotlar haqida xabarlar\n` +
-    `• 🎁 Maxsus chegirmalar va takliflar\n\n` +
-    `👇 Kanalga a'zo bo'ling va "✅ Tekshirish" tugmasini bosing:`,
+    t(lang, 'subPrompt'),
     {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard([
-        [Markup.button.url('📢 Kanalga A\'zo Bo\'lish', CHANNEL_LINK)],
-        [Markup.button.callback('✅ A\'zo Bo\'ldim — Tekshirish', 'check_sub')],
-      ])
+        [Markup.button.url(t(lang, 'subBtnJoin'), CHANNEL_LINK)],
+        [Markup.button.callback(t(lang, 'subBtnCheck'), 'check_sub')],
+      ]),
     }
   );
 }

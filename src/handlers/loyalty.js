@@ -1,21 +1,21 @@
 // ════════════════════════════════════════════════════════════════════════════
-// LOYALTY / BONUS / REFERAL / FAVORITES / REVIEWS / SUPPORT — Mijozlar uchun
+// LOYALTY / BONUS / REFERAL / FAVORITES / REVIEWS / SUPPORT / REWARDS
 // ════════════════════════════════════════════════════════════════════════════
 const {
-  getCollection, getDoc, addDoc, updateDoc, queryDocs, setDocById,
-  incrementField, arrayUnionField, arrayRemoveField, addLog, admin,
+  getCollection, getDoc, addDoc, updateDoc, queryDocs,
+  arrayUnionField, arrayRemoveField, addLog, admin,
 } = require('../services/firebase');
-const { getSession, setSession, getCart } = require('../services/session');
+const { getSession, setSession } = require('../services/session');
 const {
-  fmtNum, fmtDate, calcEarnedPoints, getLoyaltyTier, generateReferralCode,
-  generatePromoCode, isPromoValid, calcPromoDiscount, starsBar, truncate,
+  fmtNum, calcEarnedPoints, getLoyaltyTier, generateReferralCode,
+  generatePromoCode, isPromoValid, starsBar, truncate,
   REFERRAL_BONUS_POINTS, REFERRAL_WELCOME_POINTS, LOYALTY_POINT_VALUE,
 } = require('../utils/helpers');
 const {
   loyaltyMenu, favoritesNavButtons, ratingStarsKeyboard, languageButtons,
-  mainMenu, yesNoKeyboard, sortFilterButtons, quantityPickerKeyboard,
-  supportTicketKeyboard,
+  mainMenu, quantityPickerKeyboard, rewardsButtons, rewardActions,
 } = require('../utils/keyboards');
+const { t, langOf, normalizeLang } = require('../utils/i18n');
 const { Markup } = require('telegraf');
 
 const ADMIN_IDS = (process.env.ADMIN_TELEGRAM_ID || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -26,85 +26,79 @@ async function getTgUser(telegramId) {
   return users[0] || null;
 }
 
-// ─── 2. SODIQLIK / BONUS BALL TIZIMI ─────────────────────────────────────────
-
-// 2.1 Asosiy sodiqlik menyusi
-async function handleLoyaltyMenu(ctx) {
-  if (ctx.callbackQuery) await ctx.answerCbQuery();
-  const user = await getTgUser(ctx.from.id);
-  if (!user) return ctx.reply('Avval /start bosing.');
-
-  const tier = getLoyaltyTier(user.totalSpent || 0);
-  const text =
-    `🎁 *Bonus va Sodiqlik Tizimi*\n\n` +
-    `${tier.icon} Darajangiz: *${tier.name}*\n` +
-    `💰 Ballaringiz: *${fmtNum(user.loyaltyPoints || 0)}* ball\n` +
-    `🛍️ Jami xarid: *${fmtNum(user.totalSpent || 0)} so'm*\n` +
-    (tier.next ? `\n📈 Keyingi daraja: ${tier.next}\n📊 Kerak: ${fmtNum(Math.max(0, tier.nextAt - (user.totalSpent || 0)))} so'm qoldi` : `\n🏆 Siz eng yuqori darajadasiz!`) +
-    `\n\nQuyidagilardan birini tanlang:`;
-
-  if (ctx.callbackQuery) {
-    try { return ctx.editMessageText(text, { parse_mode: 'Markdown', ...loyaltyMenu() }); } catch { }
-  }
-  await ctx.reply(text, { parse_mode: 'Markdown', ...loyaltyMenu() });
+function backTo(lang, cb) {
+  return Markup.inlineKeyboard([[Markup.button.callback(t(lang, 'back'), cb)]]);
 }
 
-// 2.2 Ball balansi ko'rsatish
+// ─── 2. SODIQLIK / BONUS BALL TIZIMI ─────────────────────────────────────────
+async function handleLoyaltyMenu(ctx) {
+  const lang = langOf(ctx);
+  if (ctx.callbackQuery) await ctx.answerCbQuery();
+  const user = await getTgUser(ctx.from.id);
+  if (!user) return ctx.reply(t(lang, 'pressStart'));
+
+  const tier = getLoyaltyTier(user.totalSpent || 0);
+  const points = user.loyaltyPoints || 0;
+  const next = tier.nextKey
+    ? t(lang, 'tierNext', { next: t(lang, tier.nextKey), amount: fmtNum(Math.max(0, tier.nextAt - (user.totalSpent || 0))), som: t(lang, 'som') })
+    : t(lang, 'tierTop');
+
+  const text = t(lang, 'loyaltyMenuTitle', {
+    tierIcon: tier.icon, tier: t(lang, tier.key),
+    points: fmtNum(points), value: fmtNum(points * LOYALTY_POINT_VALUE),
+    spent: fmtNum(user.totalSpent || 0), next, som: t(lang, 'som'),
+  });
+
+  if (ctx.callbackQuery) {
+    try { return ctx.editMessageText(text, { parse_mode: 'Markdown', ...loyaltyMenu(lang) }); } catch { }
+  }
+  await ctx.reply(text, { parse_mode: 'Markdown', ...loyaltyMenu(lang) });
+}
+
 async function handleLoyaltyBalance(ctx) {
+  const lang = langOf(ctx);
   await ctx.answerCbQuery();
   const user = await getTgUser(ctx.from.id);
   if (!user) return;
   const points = user.loyaltyPoints || 0;
-  const text =
-    `💰 *Ballaringiz: ${fmtNum(points)}*\n\n` +
-    `📐 1 ball = ${LOYALTY_POINT_VALUE} so'm chegirma\n` +
-    `💵 Pulga teng qiymat: ${fmtNum(points * LOYALTY_POINT_VALUE)} so'm\n\n` +
-    `🛒 Keyingi xaridda to'lov vaqtida ballarni ishlatishingiz mumkin.`;
-  await ctx.editMessageText(text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Orqaga', 'loyalty_menu')]]) });
+  const text = t(lang, 'pointsBalance', { points: fmtNum(points), value: fmtNum(points * LOYALTY_POINT_VALUE), som: t(lang, 'som') });
+  await ctx.editMessageText(text, { parse_mode: 'Markdown', ...backTo(lang, 'loyalty_menu') });
 }
 
-// 2.3 Buyurtma tugagandan keyin ball qo'shish
 async function awardLoyaltyPoints(telegramId, orderTotal) {
   const user = await getTgUser(telegramId);
   if (!user) return 0;
   const earned = calcEarnedPoints(orderTotal);
   if (earned > 0) {
-    await updateDoc('telegramUsers', user.id, {
-      loyaltyPoints: admin.firestore.FieldValue.increment(earned),
-    });
+    await updateDoc('telegramUsers', user.id, { loyaltyPoints: admin.firestore.FieldValue.increment(earned) });
     await addLog('loyalty', `Ball qo'shildi: ${user.firstName} +${earned}`, { telegramId, earned });
   }
   return earned;
 }
 
-// 2.4 Ballarni sarflash (checkoutda)
 async function redeemLoyaltyPoints(telegramId, pointsToUse) {
   const user = await getTgUser(telegramId);
-  if (!user) return { success: false, message: 'Foydalanuvchi topilmadi' };
+  if (!user) return { success: false };
   const available = user.loyaltyPoints || 0;
-  if (pointsToUse > available) return { success: false, message: 'Ballar yetarli emas' };
-  await updateDoc('telegramUsers', user.id, {
-    loyaltyPoints: admin.firestore.FieldValue.increment(-pointsToUse),
-  });
+  if (pointsToUse > available) return { success: false };
+  await updateDoc('telegramUsers', user.id, { loyaltyPoints: admin.firestore.FieldValue.increment(-pointsToUse) });
   return { success: true, discount: pointsToUse * LOYALTY_POINT_VALUE };
 }
 
-// 2.5 Kunlik bonus (har kuni bir marta bosish mumkin)
 async function handleDailyBonus(ctx) {
+  const lang = langOf(ctx);
   await ctx.answerCbQuery();
   const user = await getTgUser(ctx.from.id);
   if (!user) return;
 
   const today = new Date().toISOString().slice(0, 10);
   if (user.lastDailyBonus === today) {
-    return ctx.editMessageText(
-      '✅ Siz bugun allaqachon bonus olgansiz!\n\n⏰ Ertaga qayta urinib ko\'ring.',
-      { ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Orqaga', 'loyalty_menu')]]) }
-    );
+    return ctx.editMessageText(t(lang, 'dailyAlready'), backTo(lang, 'loyalty_menu'));
   }
 
   const streak = (user.dailyStreak || 0) + 1;
-  const bonusAmount = Math.min(500 + streak * 100, 5000);
+  // 100 ball = 1 000 so'm bo'lgani uchun moderatsiya qilingan miqdor (20–100 ball = 200–1 000 so'm)
+  const bonusAmount = Math.min(20 + streak * 5, 100);
 
   await updateDoc('telegramUsers', user.id, {
     loyaltyPoints: admin.firestore.FieldValue.increment(bonusAmount),
@@ -114,31 +108,127 @@ async function handleDailyBonus(ctx) {
   await addLog('loyalty', `Kunlik bonus: ${user.firstName} +${bonusAmount}`, { streak });
 
   await ctx.editMessageText(
-    `🎉 *Kunlik bonus olindi!*\n\n` +
-    `💰 +${fmtNum(bonusAmount)} ball\n` +
-    `🔥 Ketma-ket: ${streak} kun\n\n` +
-    `Ertaga ham qaytib keling!`,
-    { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Orqaga', 'loyalty_menu')]]) }
+    t(lang, 'dailyClaimed', { amount: fmtNum(bonusAmount), streak }),
+    { parse_mode: 'Markdown', ...backTo(lang, 'loyalty_menu') }
   );
 }
 
-// 2.6 Darajalar haqida ma'lumot
 async function handleLoyaltyTiers(ctx) {
+  const lang = langOf(ctx);
   await ctx.answerCbQuery();
-  const text =
-    `🏆 *Sodiqlik Darajalari*\n\n` +
-    `🆕 *Yangi* — 0 so'm dan\n   Chegirma: 0%\n\n` +
-    `🥉 *Bronza* — 1,000,000 so'm dan\n   Chegirma: 1%\n\n` +
-    `🥈 *Kumush* — 5,000,000 so'm dan\n   Chegirma: 3%\n\n` +
-    `🥇 *Oltin* — 20,000,000 so'm dan\n   Chegirma: 5%\n\n` +
-    `💎 *Olmos* — 50,000,000 so'm dan\n   Chegirma: 7%\n\n` +
-    `_Daraja avtomatik jami xaridingiz asosida hisoblanadi._`;
-  await ctx.editMessageText(text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Orqaga', 'loyalty_menu')]]) });
+  await ctx.editMessageText(t(lang, 'tiersInfo', { som: t(lang, 'som') }), { parse_mode: 'Markdown', ...backTo(lang, 'loyalty_menu') });
 }
 
-// ─── 3. REFERAL TIZIMI ───────────────────────────────────────────────────────
+// ─── 3. SOVG'ALAR DO'KONI (ballarni mahsulotga almashtirish) ─────────────────
+async function handleRewardsShop(ctx, page = 0) {
+  const lang = langOf(ctx);
+  if (ctx.callbackQuery) await ctx.answerCbQuery();
+  const user = await getTgUser(ctx.from.id);
+  if (!user) return;
 
-// 3.1 Referal kodi yaratish/olish
+  let rewards = [];
+  try { rewards = await getCollection('rewards'); } catch { rewards = []; }
+  rewards = (rewards || []).filter(r => r.active !== false && (r.stock === undefined || r.stock > 0));
+  rewards.sort((a, b) => (a.pointsCost || 0) - (b.pointsCost || 0));
+
+  const points = user.loyaltyPoints || 0;
+  if (!rewards.length) {
+    const msg = t(lang, 'rewardsEmpty');
+    if (ctx.callbackQuery) { try { return ctx.editMessageText(msg, backTo(lang, 'loyalty_menu')); } catch { } }
+    return ctx.reply(msg, backTo(lang, 'loyalty_menu'));
+  }
+
+  const text = t(lang, 'rewardsTitle', { points: fmtNum(points), som: t(lang, 'som') });
+  if (ctx.callbackQuery) {
+    try { return ctx.editMessageText(text, { parse_mode: 'Markdown', ...rewardsButtons(rewards, page, lang) }); } catch { }
+  }
+  await ctx.reply(text, { parse_mode: 'Markdown', ...rewardsButtons(rewards, page, lang) });
+}
+
+async function handleRewardDetail(ctx, rewardId) {
+  const lang = langOf(ctx);
+  await ctx.answerCbQuery();
+  const user = await getTgUser(ctx.from.id);
+  const reward = await getDoc('rewards', rewardId);
+  if (!reward) return ctx.editMessageText(t(lang, 'notFound'), backTo(lang, 'rewards_shop'));
+
+  const points = user?.loyaltyPoints || 0;
+  const cost = reward.pointsCost || 0;
+  const stock = reward.stock === undefined ? '∞' : reward.stock;
+  const canRedeem = points >= cost && (reward.stock === undefined || reward.stock > 0);
+  const status = (reward.stock !== undefined && reward.stock <= 0)
+    ? t(lang, 'rewardOutOfStock')
+    : (canRedeem ? t(lang, 'rewardEnough') : t(lang, 'rewardNotEnough', { need: fmtNum(cost - points) }));
+
+  const text = t(lang, 'rewardDetail', {
+    name: reward.name,
+    desc: reward.description ? `${reward.description}\n\n` : '',
+    cost: fmtNum(cost), value: fmtNum(cost * LOYALTY_POINT_VALUE),
+    stock, points: fmtNum(points), status, som: t(lang, 'som'),
+  });
+
+  const kb = rewardActions(rewardId, canRedeem, lang);
+  try {
+    if (reward.imageUrl) {
+      await ctx.editMessageText(text, { parse_mode: 'Markdown', ...kb });
+    } else {
+      await ctx.editMessageText(text, { parse_mode: 'Markdown', ...kb });
+    }
+  } catch {
+    await ctx.reply(text, { parse_mode: 'Markdown', ...kb });
+  }
+}
+
+async function handleRewardRedeem(ctx, rewardId) {
+  const lang = langOf(ctx);
+  const user = await getTgUser(ctx.from.id);
+  const reward = await getDoc('rewards', rewardId);
+  if (!user || !reward) return ctx.answerCbQuery(t(lang, 'notFound'));
+
+  const cost = reward.pointsCost || 0;
+  const points = user.loyaltyPoints || 0;
+
+  if (reward.stock !== undefined && reward.stock <= 0) {
+    return ctx.answerCbQuery(t(lang, 'rewardOutOfStock'), { show_alert: true });
+  }
+  if (points < cost) {
+    return ctx.answerCbQuery(t(lang, 'rewardNotEnough', { need: fmtNum(cost - points) }), { show_alert: true });
+  }
+
+  await ctx.answerCbQuery();
+  // Ballarni yechish va sovg'a zaxirasini kamaytirish
+  await updateDoc('telegramUsers', user.id, { loyaltyPoints: admin.firestore.FieldValue.increment(-cost) });
+  if (reward.stock !== undefined) {
+    await updateDoc('rewards', rewardId, { stock: Math.max(0, reward.stock - 1) }).catch(() => { });
+  }
+
+  const redemptionId = await addDoc('rewardRedemptions', {
+    rewardId, rewardName: reward.name, pointsSpent: cost,
+    telegramId: String(ctx.from.id),
+    customerName: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+    customerPhone: user.phone || '',
+    status: 'pending',
+  });
+  await addLog('reward', `Sovg'a olindi: ${reward.name} — ${user.firstName} (-${cost})`, { redemptionId });
+
+  const remaining = Math.max(0, points - cost);
+  await ctx.editMessageText(
+    t(lang, 'rewardRedeemed', { name: reward.name, cost: fmtNum(cost), points: fmtNum(remaining) }),
+    { parse_mode: 'Markdown', ...backTo(lang, 'rewards_shop') }
+  );
+
+  // Adminlarga xabar
+  for (const adminId of ADMIN_IDS) {
+    try {
+      await ctx.telegram.sendMessage(adminId,
+        `🎁 *Yangi sovg'a so'rovi!*\n\n👤 ${user.firstName} (${ctx.from.id})\n📱 ${user.phone || '-'}\n🎁 ${reward.name}\n💰 ${fmtNum(cost)} ball`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch { }
+  }
+}
+
+// ─── 4. REFERAL TIZIMI ───────────────────────────────────────────────────────
 async function getOrCreateReferralCode(user) {
   if (user.referralCode) return user.referralCode;
   const code = generateReferralCode(user.telegramId);
@@ -146,8 +236,8 @@ async function getOrCreateReferralCode(user) {
   return code;
 }
 
-// 3.2 Referal ma'lumot va ulashish
 async function handleReferralInfo(ctx) {
+  const lang = langOf(ctx);
   await ctx.answerCbQuery();
   const user = await getTgUser(ctx.from.id);
   if (!user) return;
@@ -155,32 +245,27 @@ async function handleReferralInfo(ctx) {
   const code = await getOrCreateReferralCode(user);
   const botUsername = (process.env.BOT_USERNAME || 'BoomStroyBot').replace('@', '');
   const link = `https://t.me/${botUsername}?start=ref_${code}`;
-  const referredCount = user.referredCount || 0;
 
-  const text =
-    `👥 *Do'stlarni Taklif Qilish*\n\n` +
-    `Har bir taklif qilingan do'stingiz uchun siz *${fmtNum(REFERRAL_BONUS_POINTS)} ball* olasiz!\n` +
-    `Do'stingiz esa *${fmtNum(REFERRAL_WELCOME_POINTS)} ball* bonus bilan boshlaydi.\n\n` +
-    `🔗 Sizning havolangiz:\n\`${link}\`\n\n` +
-    `📊 Siz taklif qilgan do'stlar: *${referredCount}* ta\n` +
-    `💰 Jami olingan referal bonus: *${fmtNum(user.referralEarnings || 0)}* ball`;
+  const text = t(lang, 'referralInfo', {
+    bonus: fmtNum(REFERRAL_BONUS_POINTS), welcome: fmtNum(REFERRAL_WELCOME_POINTS),
+    link, count: user.referredCount || 0, earnings: fmtNum(user.referralEarnings || 0),
+  });
 
   await ctx.editMessageText(text, {
     parse_mode: 'Markdown',
     ...Markup.inlineKeyboard([
-      [Markup.button.url('📤 Do\'stga yuborish', `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent('BoomStroy — qurilish materiallari! Mendan bonus oling:')}`)],
-      [Markup.button.callback('🔙 Orqaga', 'loyalty_menu')],
+      [Markup.button.url(t(lang, 'btnSendToFriend'), `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(t(lang, 'referralShareText'))}`)],
+      [Markup.button.callback(t(lang, 'back'), 'loyalty_menu')],
     ]),
   });
 }
 
-// 3.3 Referal orqali kelganini ro'yxatdan o'tkazish (start.js dan chaqiriladi)
 async function processReferral(newUser, referralCode) {
   if (!referralCode || !newUser?.id) return null;
   const referrers = await queryDocs('telegramUsers', 'referralCode', '==', referralCode);
   const referrer = referrers[0];
   if (!referrer || referrer.telegramId === newUser.telegramId) return null;
-  if (newUser.referredBy) return null; // allaqachon referal orqali kelgan
+  if (newUser.referredBy) return null;
 
   await updateDoc('telegramUsers', newUser.id, {
     referredBy: referrer.telegramId,
@@ -195,20 +280,19 @@ async function processReferral(newUser, referralCode) {
   return referrer;
 }
 
-// ─── 4. PROMO-KODLAR / KUPONLAR ──────────────────────────────────────────────
-
-// 4.1 Promo-kod kiritishni so'rash
+// ─── 5. PROMO-KODLAR ─────────────────────────────────────────────────────────
 async function handlePromoEnterStart(ctx) {
+  const lang = langOf(ctx);
   await ctx.answerCbQuery();
   setSession(ctx.from.id, { step: 'entering_promo' });
-  await ctx.editMessageText(
-    '🎟️ *Promo-kodni kiriting:*\n\n_Masalan: PROMO-AB12CD_',
-    { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('❌ Bekor qilish', 'loyalty_menu')]]) }
-  );
+  await ctx.editMessageText(t(lang, 'promoEnterPrompt'), {
+    parse_mode: 'Markdown',
+    ...Markup.inlineKeyboard([[Markup.button.callback(t(lang, 'cancel'), 'loyalty_menu')]]),
+  });
 }
 
-// 4.2 Promo-kodni tekshirish va qo'llash (matn xabar orqali)
 async function handlePromoCodeText(ctx) {
+  const lang = langOf(ctx);
   const s = getSession(ctx.from.id);
   if (s.step !== 'entering_promo') return;
   const code = ctx.message.text.trim().toUpperCase();
@@ -218,25 +302,18 @@ async function handlePromoCodeText(ctx) {
   const promo = promos[0];
 
   if (!promo || !isPromoValid(promo)) {
-    return ctx.reply('❌ Promo-kod topilmadi yoki muddati o\'tgan.', mainMenu());
+    return ctx.reply(t(lang, 'promoInvalid'), mainMenu(lang));
   }
-
   const usedBy = promo.usedByUsers || [];
   if (usedBy.includes(String(ctx.from.id))) {
-    return ctx.reply('⚠️ Siz bu promo-koddan allaqachon foydalangansiz.', mainMenu());
+    return ctx.reply(t(lang, 'promoUsed'), mainMenu(lang));
   }
 
   setSession(ctx.from.id, { activePromo: promo });
-  await ctx.reply(
-    `✅ *Promo-kod qabul qilindi!*\n\n` +
-    `🎟️ ${promo.code}\n` +
-    `🎁 Chegirma: ${promo.type === 'percent' ? promo.value + '%' : fmtNum(promo.value) + ' so\'m'}\n\n` +
-    `Bu chegirma keyingi buyurtmangizga avtomatik qo'llanadi!`,
-    { parse_mode: 'Markdown', ...mainMenu() }
-  );
+  const disc = promo.type === 'percent' ? promo.value + '%' : fmtNum(promo.value) + ' ' + t(lang, 'som');
+  await ctx.reply(t(lang, 'promoAccepted', { code: promo.code, disc }), { parse_mode: 'Markdown', ...mainMenu(lang) });
 }
 
-// 4.3 Promo-kod ishlatilganini belgilash (buyurtma yakunlanganda)
 async function markPromoUsed(promoId, telegramId) {
   if (!promoId) return;
   await updateDoc('promoCodes', promoId, {
@@ -245,133 +322,121 @@ async function markPromoUsed(promoId, telegramId) {
   });
 }
 
-// 4.4 Admin tomonidan promo-kod yaratish (botdan, oddiy buyruq)
 async function createPromoCode(type, value, maxUses, expiresInDays) {
   const code = generatePromoCode();
   const data = {
-    code, type, value,
-    maxUses: maxUses || null,
-    usedCount: 0,
-    usedByUsers: [],
-    active: true,
+    code, type, value, maxUses: maxUses || null, usedCount: 0,
+    usedByUsers: [], active: true,
     expiresAt: expiresInDays ? new Date(Date.now() + expiresInDays * 86400000) : null,
   };
   const id = await addDoc('promoCodes', data);
   return { id, ...data };
 }
 
-// ─── 5. SEVIMLILAR (FAVORITES) ───────────────────────────────────────────────
-
-// 5.1 Sevimliga qo'shish/olib tashlash (toggle)
+// ─── 6. SEVIMLILAR ───────────────────────────────────────────────────────────
 async function handleFavoriteToggle(ctx, productId) {
+  const lang = langOf(ctx);
   const user = await getTgUser(ctx.from.id);
-  if (!user) return ctx.answerCbQuery('Avval /start bosing');
+  if (!user) return ctx.answerCbQuery(t(lang, 'pressStart'));
 
   const favorites = user.favorites || [];
   const isFav = favorites.includes(productId);
 
   if (isFav) {
     await arrayRemoveField('telegramUsers', user.id, 'favorites', productId);
-    await ctx.answerCbQuery('💔 Sevimlilardan olib tashlandi');
+    await ctx.answerCbQuery(t(lang, 'favRemoved'));
   } else {
     await arrayUnionField('telegramUsers', user.id, 'favorites', productId);
-    await ctx.answerCbQuery('❤️ Sevimlilarga qo\'shildi!');
+    await ctx.answerCbQuery(t(lang, 'favAdded'));
   }
 
-  // Tugmani yangilash (agar mumkin bo'lsa)
   try {
     const { productActionsV2 } = require('../utils/keyboards');
     const cart = require('../services/session').getCart(ctx.from.id);
     const cartQty = cart.find(i => i.productId === productId)?.qty || 0;
-    await ctx.editMessageReplyMarkup(productActionsV2(productId, cartQty, !isFav).reply_markup);
+    await ctx.editMessageReplyMarkup(productActionsV2(productId, cartQty, !isFav, lang).reply_markup);
   } catch { }
 }
 
-// 5.2 Sevimlilar ro'yxatini ko'rish
 async function handleViewFavorites(ctx, page = 0) {
+  const lang = langOf(ctx);
   if (ctx.callbackQuery) await ctx.answerCbQuery();
   const user = await getTgUser(ctx.from.id);
   if (!user || !(user.favorites || []).length) {
-    const msg = '❤️ Sevimlilar ro\'yxati bo\'sh.\n\nMahsulotlarni "❤️" tugmasi orqali qo\'shing!';
-    const kb = Markup.inlineKeyboard([[Markup.button.callback('🛍️ Mahsulotlar', 'categories')]]);
-    if (ctx.callbackQuery) return ctx.editMessageText(msg, kb);
+    const msg = t(lang, 'favEmpty');
+    const kb = Markup.inlineKeyboard([[Markup.button.callback(t(lang, 'btnProducts'), 'categories')]]);
+    if (ctx.callbackQuery) { try { return ctx.editMessageText(msg, kb); } catch { } }
     return ctx.reply(msg, kb);
   }
 
   const allProducts = await getCollection('products');
   const favProducts = allProducts.filter(p => (user.favorites || []).includes(p.id));
 
-  const text = `❤️ *Sevimlilar* (${favProducts.length} ta)\n\nTanlang:`;
+  const text = t(lang, 'favTitle', { n: favProducts.length });
   if (ctx.callbackQuery) {
-    return ctx.editMessageText(text, { parse_mode: 'Markdown', ...favoritesNavButtons(favProducts, page) });
+    try { return ctx.editMessageText(text, { parse_mode: 'Markdown', ...favoritesNavButtons(favProducts, page, lang) }); } catch { }
   }
-  await ctx.reply(text, { parse_mode: 'Markdown', ...favoritesNavButtons(favProducts, page) });
+  await ctx.reply(text, { parse_mode: 'Markdown', ...favoritesNavButtons(favProducts, page, lang) });
 }
 
-// 5.3 Mahsulot sevimli ekanligini tekshirish
 async function isProductFavorite(telegramId, productId) {
   const user = await getTgUser(telegramId);
   return (user?.favorites || []).includes(productId);
 }
 
-// 5.4 Barcha sevimlilarni savatga qo'shish
 async function handleAddAllFavoritesToCart(ctx) {
+  const lang = langOf(ctx);
   await ctx.answerCbQuery();
   const user = await getTgUser(ctx.from.id);
-  if (!user || !(user.favorites || []).length) return ctx.reply('Sevimlilar bo\'sh.');
+  if (!user || !(user.favorites || []).length) return ctx.reply(t(lang, 'favEmpty'));
 
   const { updateCart } = require('../services/session');
   const allProducts = await getCollection('products');
   let added = 0;
   for (const favId of user.favorites) {
     const p = allProducts.find(x => x.id === favId);
-    if (p && (p.quantity || 0) > 0 && p.status !== 'inactive') {
-      updateCart(ctx.from.id, p, 1);
-      added++;
-    }
+    if (p && (p.quantity || 0) > 0 && p.status !== 'inactive') { updateCart(ctx.from.id, p, 1); added++; }
   }
-  await ctx.reply(`✅ ${added} ta mahsulot savatga qo'shildi!`, mainMenu());
+  await ctx.reply(t(lang, 'cartAdded'), mainMenu(lang));
 }
 
-// ─── 6. MAHSULOT SHARHLARI VA REYTING ────────────────────────────────────────
-
-// 6.1 Sharh yozishni boshlash (yulduz tanlash)
+// ─── 7. SHARHLAR VA REYTING ──────────────────────────────────────────────────
 async function handleReviewStart(ctx, productId) {
+  const lang = langOf(ctx);
   await ctx.answerCbQuery();
-  await ctx.reply('⭐ Mahsulotga baho bering:', ratingStarsKeyboard(productId));
+  await ctx.reply(t(lang, 'rateProduct'), ratingStarsKeyboard(productId, lang));
 }
 
-// 6.2 Yulduz tanlangandan keyin izoh so'rash
 async function handleReviewStarSelect(ctx, productId, stars) {
-  await ctx.answerCbQuery(`${stars} yulduz tanlandi`);
+  const lang = langOf(ctx);
+  await ctx.answerCbQuery(t(lang, 'reviewStarsChosen', { stars }));
   setSession(ctx.from.id, { step: 'writing_review', reviewProductId: productId, reviewStars: parseInt(stars) });
   await ctx.editMessageText(
-    `${'⭐'.repeat(parseInt(stars))}\n\n✍️ Izoh qoldirishni xohlaysizmi? Yozing yoki "o'tkazib yuborish" deb yuboring.`,
-    { ...Markup.inlineKeyboard([[Markup.button.callback('⏭️ O\'tkazib yuborish', `review_skip:${productId}:${stars}`)]]) }
+    `${'⭐'.repeat(parseInt(stars))}${t(lang, 'reviewAskComment')}`,
+    { ...Markup.inlineKeyboard([[Markup.button.callback(t(lang, 'btnSkip'), `review_skip:${productId}:${stars}`)]]) }
   );
 }
 
-// 6.3 Sharh matnini saqlash
 async function handleReviewTextSave(ctx) {
+  const lang = langOf(ctx);
   const s = getSession(ctx.from.id);
   if (s.step !== 'writing_review') return;
 
   const user = await getTgUser(ctx.from.id);
   await saveReview(s.reviewProductId, ctx.from.id, user, s.reviewStars, ctx.message.text);
   setSession(ctx.from.id, { step: null, reviewProductId: null, reviewStars: null });
-  await ctx.reply('✅ Rahmat! Sharhingiz saqlandi.', mainMenu());
+  await ctx.reply(t(lang, 'reviewSaved'), mainMenu(lang));
 }
 
-// 6.4 Sharhni o'tkazib yuborish (faqat yulduz)
 async function handleReviewSkip(ctx, productId, stars) {
+  const lang = langOf(ctx);
   await ctx.answerCbQuery();
   const user = await getTgUser(ctx.from.id);
   await saveReview(productId, ctx.from.id, user, parseInt(stars), '');
   setSession(ctx.from.id, { step: null });
-  await ctx.editMessageText(`${'⭐'.repeat(parseInt(stars))}\n\n✅ Rahmat, bahoyingiz saqlandi!`);
+  await ctx.editMessageText(`${'⭐'.repeat(parseInt(stars))}${t(lang, 'reviewRatingSaved')}`);
 }
 
-// 6.5 Sharhni Firestore'ga yozish va mahsulot reytingini yangilash
 async function saveReview(productId, telegramId, user, stars, comment) {
   await addDoc('reviews', {
     productId, telegramId: String(telegramId),
@@ -382,36 +447,28 @@ async function saveReview(productId, telegramId, user, stars, comment) {
   await addLog('review', `Yangi sharh: ${productId} — ${stars}⭐`);
 }
 
-// 6.6 Mahsulotning o'rtacha reytingini qayta hisoblash
 async function recalcProductRating(productId) {
   const reviews = await queryDocs('reviews', 'productId', '==', productId);
   if (!reviews.length) return;
   const avg = reviews.reduce((s, r) => s + (r.stars || 0), 0) / reviews.length;
-  await updateDoc('products', productId, {
-    avgRating: parseFloat(avg.toFixed(1)),
-    reviewCount: reviews.length,
-  });
+  await updateDoc('products', productId, { avgRating: parseFloat(avg.toFixed(1)), reviewCount: reviews.length });
 }
 
-// 6.7 Mahsulot sharhlarini ko'rsatish
 async function handleViewProductReviews(ctx, productId) {
+  const lang = langOf(ctx);
   await ctx.answerCbQuery();
   const reviews = await queryDocs('reviews', 'productId', '==', productId);
-  if (!reviews.length) {
-    return ctx.reply('💬 Bu mahsulot uchun hali sharhlar yo\'q.');
-  }
+  if (!reviews.length) return ctx.reply(t(lang, 'noReviews'));
   reviews.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
   const text =
-    `💬 *Sharhlar* (${reviews.length} ta)\n\n` +
+    `${t(lang, 'reviewsTitle', { n: reviews.length })}\n\n` +
     reviews.slice(0, 8).map(r =>
-      `${starsBar(r.stars)} *${r.customerName}*\n${r.comment ? truncate(r.comment, 100) : '_(izohsiz)_'}`
+      `${starsBar(r.stars)} *${r.customerName}*\n${r.comment ? truncate(r.comment, 100) : t(lang, 'noComment')}`
     ).join('\n\n');
   await ctx.reply(text, { parse_mode: 'Markdown' });
 }
 
-// ─── 7. OXIRGI KO'RILGAN MAHSULOTLAR ─────────────────────────────────────────
-
-// 7.1 Ko'rilgan mahsulotni ro'yxatga qo'shish (ko'p marotaba chaqiriladi)
+// ─── 8. OXIRGI KO'RILGANLAR ──────────────────────────────────────────────────
 async function trackRecentlyViewed(telegramId, productId) {
   try {
     const user = await getTgUser(telegramId);
@@ -424,124 +481,107 @@ async function trackRecentlyViewed(telegramId, productId) {
   } catch { }
 }
 
-// 7.2 Oxirgi ko'rilganlarni ko'rsatish
 async function handleRecentlyViewed(ctx) {
+  const lang = langOf(ctx);
   if (ctx.callbackQuery) await ctx.answerCbQuery();
   const user = await getTgUser(ctx.from.id);
-  if (!user || !(user.recentlyViewed || []).length) {
-    return ctx.reply('🕐 Hali hech narsa ko\'rmagansiz.');
-  }
+  if (!user || !(user.recentlyViewed || []).length) return ctx.reply(t(lang, 'recentEmpty'));
   const allProducts = await getCollection('products');
-  const recentProducts = user.recentlyViewed
-    .map(id => allProducts.find(p => p.id === id))
-    .filter(Boolean);
-
-  const text = `🕐 *Oxirgi ko'rilganlar*\n\nTanlang:`;
-  await ctx.reply(text, { parse_mode: 'Markdown', ...favoritesNavButtons(recentProducts, 0) });
+  const recentProducts = user.recentlyViewed.map(id => allProducts.find(p => p.id === id)).filter(Boolean);
+  await ctx.reply(t(lang, 'recentTitle'), { parse_mode: 'Markdown', ...favoritesNavButtons(recentProducts, 0, lang) });
 }
 
-// ─── 8. NARX KUZATUVI VA OGOHLANTIRISH ───────────────────────────────────────
-
-// 8.1 Mahsulot narxi tushganda xabar olish uchun obuna bo'lish
+// ─── 9. NARX / ZAXIRA OGOHLANTIRISHLARI ──────────────────────────────────────
 async function handlePriceAlertSubscribe(ctx, productId) {
-  await ctx.answerCbQuery();
+  const lang = langOf(ctx);
   const user = await getTgUser(ctx.from.id);
-  if (!user) return;
+  if (!user) return ctx.answerCbQuery();
   await arrayUnionField('telegramUsers', user.id, 'priceAlerts', productId);
-  await ctx.answerCbQuery('🔔 Narx kamayganda sizga xabar beramiz!', { show_alert: true });
+  await ctx.answerCbQuery(t(lang, 'priceAlertSet'), { show_alert: true });
 }
 
-// 8.2 Mahsulot qayta zaxiraga kelganda xabar olish uchun obuna
 async function handleStockAlertSubscribe(ctx, productId) {
-  await ctx.answerCbQuery();
+  const lang = langOf(ctx);
   const user = await getTgUser(ctx.from.id);
-  if (!user) return;
+  if (!user) return ctx.answerCbQuery();
   await arrayUnionField('telegramUsers', user.id, 'stockAlerts', productId);
-  await ctx.answerCbQuery('🔔 Mahsulot kelganda xabar beramiz!', { show_alert: true });
+  await ctx.answerCbQuery(t(lang, 'stockAlertSet'), { show_alert: true });
 }
 
-// 8.3 Narx tushganda barcha obunachilarga xabar yuborish (admin yangilaganda chaqiriladi)
 async function notifyPriceDropSubscribers(bot, productId, oldPrice, newPrice) {
   if (newPrice >= oldPrice) return;
   const users = await queryDocs('telegramUsers', 'priceAlerts', 'array-contains', productId);
   const product = await getDoc('products', productId);
   if (!product) return;
-  const text =
-    `🔥 *Narx tushdi!*\n\n📦 ${product.name}\n` +
-    `~~${fmtNum(oldPrice)} so'm~~ → *${fmtNum(newPrice)} so'm*\n\n` +
-    `Tezroq buyurtma bering!`;
   for (const u of users) {
     try {
-      await bot.telegram.sendMessage(u.telegramId, text, { parse_mode: 'Markdown' });
+      const lang = normalizeLang(u.lang);
+      await bot.telegram.sendMessage(u.telegramId,
+        t(lang, 'priceDrop', { name: product.name, old: fmtNum(oldPrice), new: fmtNum(newPrice), som: t(lang, 'som') }),
+        { parse_mode: 'Markdown' });
       await arrayRemoveField('telegramUsers', u.id, 'priceAlerts', productId);
     } catch { }
   }
 }
 
-// 8.4 Zaxira kelganda obunachilarga xabar (admin to'ldirganda chaqiriladi)
 async function notifyStockArrivalSubscribers(bot, productId) {
   const users = await queryDocs('telegramUsers', 'stockAlerts', 'array-contains', productId);
   const product = await getDoc('products', productId);
   if (!product || !users.length) return;
-  const text = `✅ *Mahsulot qayta zaxiraga keldi!*\n\n📦 ${product.name}\n💰 ${fmtNum(product.price)} so'm`;
   for (const u of users) {
     try {
-      await bot.telegram.sendMessage(u.telegramId, text, { parse_mode: 'Markdown' });
+      const lang = normalizeLang(u.lang);
+      await bot.telegram.sendMessage(u.telegramId,
+        t(lang, 'stockArrived', { name: product.name, price: fmtNum(product.price), som: t(lang, 'som') }),
+        { parse_mode: 'Markdown' });
       await arrayRemoveField('telegramUsers', u.id, 'stockAlerts', productId);
     } catch { }
   }
 }
 
-// ─── 9. SUPPORT / MUROJAAT TIZIMI ────────────────────────────────────────────
-
-// 9.1 Yangi murojaat boshlash
+// ─── 10. SUPPORT ─────────────────────────────────────────────────────────────
 async function handleSupportNewTicket(ctx) {
-  await ctx.answerCbQuery();
+  const lang = langOf(ctx);
+  if (ctx.callbackQuery) await ctx.answerCbQuery();
   setSession(ctx.from.id, { step: 'support_writing' });
-  await ctx.reply('✍️ Murojaatingizni yozing (savol, shikoyat, taklif):', {
-    ...Markup.keyboard([['❌ Bekor qilish']]).resize().oneTime(),
-  });
+  await ctx.reply(t(lang, 'supportPrompt'), { ...Markup.keyboard([[t(lang, 'cancel')]]).resize().oneTime() });
 }
 
-// 9.2 Murojaat matnini saqlash va adminlarga yuborish
 async function handleSupportTicketSave(ctx) {
+  const lang = langOf(ctx);
   const s = getSession(ctx.from.id);
   if (s.step !== 'support_writing') return;
   setSession(ctx.from.id, { step: null });
 
-  const user = await getTgUser(ctx.from.id);
   const ticketId = await addDoc('supportTickets', {
     telegramId: String(ctx.from.id),
     customerName: `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim(),
-    message: ctx.message.text,
-    status: 'open',
+    message: ctx.message.text, status: 'open',
   });
 
-  await ctx.reply('✅ Murojaatingiz qabul qilindi! Tez orada javob beramiz.', mainMenu());
+  await ctx.reply(t(lang, 'supportSent'), mainMenu(lang));
 
   for (const adminId of ADMIN_IDS) {
     try {
       await ctx.telegram.sendMessage(adminId,
         `🆘 *Yangi murojaat!*\n\n👤 ${ctx.from.first_name} (${ctx.from.id})\n\n📝 ${ctx.message.text}`,
-        { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('✍️ Javob berish', `support_reply:${ticketId}:${ctx.from.id}`)]]) }
-      );
+        { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('✍️ Javob berish', `support_reply:${ticketId}:${ctx.from.id}`)]]) });
     } catch { }
   }
 }
 
-// 9.3 Mijozning o'z murojaatlarini ko'rish
 async function handleMySupportTickets(ctx) {
+  const lang = langOf(ctx);
   await ctx.answerCbQuery();
   const tickets = await queryDocs('supportTickets', 'telegramId', '==', String(ctx.from.id));
-  if (!tickets.length) return ctx.reply('📋 Sizda murojaatlar yo\'q.');
+  if (!tickets.length) return ctx.reply(t(lang, 'supportNoTickets'));
   tickets.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-  const text = tickets.slice(0, 10).map((t, i) =>
-    `${i + 1}. ${t.status === 'open' ? '🟡' : '✅'} ${truncate(t.message, 50)}\n   ${t.reply ? '💬 Javob: ' + truncate(t.reply, 60) : '⏳ Javob kutilmoqda'}`
+  const text = tickets.slice(0, 10).map((t2, i) =>
+    `${i + 1}. ${t2.status === 'open' ? '🟡' : '✅'} ${truncate(t2.message, 50)}\n   ${t2.reply ? t(lang, 'supportReplyLabel') + truncate(t2.reply, 60) : t(lang, 'supportWaiting')}`
   ).join('\n\n');
-  await ctx.reply(`📋 *Murojaatlaringiz:*\n\n${text}`, { parse_mode: 'Markdown' });
+  await ctx.reply(`${t(lang, 'supportMyTitle')}\n\n${text}`, { parse_mode: 'Markdown' });
 }
 
-// 9.4 Admin javob berishni boshlashi
 async function handleSupportReplyStart(ctx, ticketId, customerTgId) {
   if (!ADMIN_IDS.includes(String(ctx.from.id))) return ctx.answerCbQuery('Ruxsat yo\'q');
   await ctx.answerCbQuery();
@@ -549,7 +589,6 @@ async function handleSupportReplyStart(ctx, ticketId, customerTgId) {
   await ctx.reply('✍️ Javobingizni yozing:');
 }
 
-// 9.5 Admin javobini mijozga yetkazish
 async function handleSupportReplySave(ctx) {
   const s = getSession(ctx.from.id);
   if (s.step !== 'support_admin_reply') return;
@@ -557,100 +596,94 @@ async function handleSupportReplySave(ctx) {
 
   await updateDoc('supportTickets', s.replyTicketId, { status: 'closed', reply: ctx.message.text });
   try {
+    // Mijozning tilida javob sarlavhasi
+    const cust = await getTgUser(s.replyCustomerId);
+    const lang = normalizeLang(cust?.lang);
     await ctx.telegram.sendMessage(s.replyCustomerId,
-      `💬 *Sizning murojaatingizga javob:*\n\n${ctx.message.text}`,
-      { parse_mode: 'Markdown' }
-    );
+      `${t(lang, 'supportReplyToYou')}\n\n${ctx.message.text}`, { parse_mode: 'Markdown' });
   } catch { }
   await ctx.reply('✅ Javob yuborildi.');
 }
 
-// ─── 10. TIL TANLASH (ko'p tillilik asoslari) ────────────────────────────────
-
+// ─── 11. TIL TANLASH ─────────────────────────────────────────────────────────
 async function handleLanguageMenu(ctx) {
-  await ctx.reply('🌐 Tilni tanlang / Choose language / Выберите язык:', languageButtons());
+  const lang = langOf(ctx);
+  await ctx.reply(t(lang, 'chooseLang'), languageButtons());
 }
 
 async function handleLanguageSelect(ctx, lang) {
   await ctx.answerCbQuery();
+  const normalized = normalizeLang(lang);
   const user = await getTgUser(ctx.from.id);
-  if (user) await updateDoc('telegramUsers', user.id, { lang });
-  const labels = { uz: '🇺🇿 O\'zbekcha tanlandi', ru: '🇷🇺 Выбран русский', en: '🇬🇧 English selected' };
-  await ctx.editMessageText(labels[lang] || 'OK');
+  if (user) await updateDoc('telegramUsers', user.id, { lang: normalized });
+  ctx.state.lang = normalized;
+  try { require('../middlewares/auth').setUserLangCache(ctx.from.id, normalized); } catch { }
+
+  try { await ctx.editMessageText(t(normalized, 'langSet')); } catch { }
+  await ctx.reply(t(normalized, 'mainMenuTitle'), mainMenu(normalized));
 }
 
-// ─── 11. SAVATGA MIQDOR TANLAGICH ────────────────────────────────────────────
-
+// ─── 12. MIQDOR TANLAGICH ────────────────────────────────────────────────────
 async function handleQtyPickerInc(ctx, productId) {
+  const lang = langOf(ctx);
   await ctx.answerCbQuery();
   const s = getSession(ctx.from.id);
   const tempQty = (s.tempQty && s.tempQty[productId]) || 1;
   setSession(ctx.from.id, { tempQty: { ...(s.tempQty || {}), [productId]: tempQty + 1 } });
-  try {
-    await ctx.editMessageReplyMarkup(quantityPickerKeyboard(productId, tempQty + 1).reply_markup);
-  } catch { }
+  try { await ctx.editMessageReplyMarkup(quantityPickerKeyboard(productId, tempQty + 1, lang).reply_markup); } catch { }
 }
 
 async function handleQtyPickerDec(ctx, productId) {
+  const lang = langOf(ctx);
   await ctx.answerCbQuery();
   const s = getSession(ctx.from.id);
   const tempQty = Math.max(1, ((s.tempQty && s.tempQty[productId]) || 1) - 1);
   setSession(ctx.from.id, { tempQty: { ...(s.tempQty || {}), [productId]: tempQty } });
-  try {
-    await ctx.editMessageReplyMarkup(quantityPickerKeyboard(productId, tempQty).reply_markup);
-  } catch { }
+  try { await ctx.editMessageReplyMarkup(quantityPickerKeyboard(productId, tempQty, lang).reply_markup); } catch { }
 }
 
 async function handleQtyPickerConfirm(ctx, productId) {
+  const lang = langOf(ctx);
   const s = getSession(ctx.from.id);
   const qty = (s.tempQty && s.tempQty[productId]) || 1;
   const allProducts = await getCollection('products');
   const p = allProducts.find(x => x.id === productId);
-  if (!p) return ctx.answerCbQuery('Topilmadi');
+  if (!p) return ctx.answerCbQuery(t(lang, 'notFound'));
   const { updateCart } = require('../services/session');
   updateCart(ctx.from.id, p, qty);
-  await ctx.answerCbQuery(`✅ ${qty} ta savatga qo'shildi`);
+  await ctx.answerCbQuery(t(lang, 'cartAdded'));
 }
 
-// ─── 12. BUYURTMADAN KEYIN BAHOLASH ──────────────────────────────────────────
-
+// ─── 13. BUYURTMADAN KEYIN BAHOLASH ──────────────────────────────────────────
 async function handleOrderRatingRequest(bot, telegramId, orderId, orderNumber) {
   try {
+    const cust = await getTgUser(telegramId);
+    const lang = normalizeLang(cust?.lang);
     await bot.telegram.sendMessage(telegramId,
-      `⭐ Buyurtmangiz (${orderNumber}) yetkazildi!\n\nXizmatimizni qanday baholaysiz?`,
-      require('../utils/keyboards').orderRatingKeyboard(orderId)
-    );
+      t(lang, 'orderRateAsk', { num: orderNumber }),
+      require('../utils/keyboards').orderRatingKeyboard(orderId));
   } catch { }
 }
 
 async function handleOrderRatingSave(ctx, orderId, stars) {
-  await ctx.answerCbQuery('Rahmat!');
+  const lang = langOf(ctx);
+  await ctx.answerCbQuery(t(lang, 'thanks'));
   await updateDoc('orders', orderId, { customerRating: parseInt(stars) });
-  await ctx.editMessageText(`${'⭐'.repeat(parseInt(stars))}\n\nFikringiz uchun rahmat! 🙏`);
+  await ctx.editMessageText(`${'⭐'.repeat(parseInt(stars))}${t(lang, 'thanksFeedback')}`);
 }
 
-// ─── 13. STATIK MA'LUMOT / FAQ ───────────────────────────────────────────────
-
+// ─── 14. FAQ ─────────────────────────────────────────────────────────────────
 async function handleFAQ(ctx) {
-  const text =
-    `❓ *Tez-tez so'raladigan savollar*\n\n` +
-    `*1. Qanday buyurtma berish mumkin?*\n` +
-    `Mahsulotlar bo'limidan tanlang, savatga qo'shing va buyurtma bering.\n\n` +
-    `*2. To'lov qanday amalga oshiriladi?*\n` +
-    `Naqd (yetkazganda) yoki karta orqali oldindan.\n\n` +
-    `*3. Yetkazib berish qancha vaqt oladi?*\n` +
-    `Masofaga qarab 1-8 soat ichida.\n\n` +
-    `*4. Mahsulotni qaytarish mumkinmi?*\n` +
-    `Ha, 24 soat ichida @boomstroy_support ga yozing.\n\n` +
-    `*5. Bonus ballarni qanday ishlatish mumkin?*\n` +
-    `🎁 Bonus va Sodiqlik bo'limida ko'rishingiz mumkin.`;
-  await ctx.reply(text, { parse_mode: 'Markdown', ...mainMenu() });
+  const lang = langOf(ctx);
+  const SUPPORT_USERNAME = process.env.SUPPORT_USERNAME || '@boomstroy_support';
+  await ctx.reply(t(lang, 'faq', { support: SUPPORT_USERNAME, som: t(lang, 'som') }), { parse_mode: 'Markdown', ...mainMenu(lang) });
 }
 
 module.exports = {
   getTgUser,
   handleLoyaltyMenu, handleLoyaltyBalance, awardLoyaltyPoints, redeemLoyaltyPoints,
   handleDailyBonus, handleLoyaltyTiers,
+  handleRewardsShop, handleRewardDetail, handleRewardRedeem,
   getOrCreateReferralCode, handleReferralInfo, processReferral,
   handlePromoEnterStart, handlePromoCodeText, markPromoUsed, createPromoCode,
   handleFavoriteToggle, handleViewFavorites, isProductFavorite, handleAddAllFavoritesToCart,
