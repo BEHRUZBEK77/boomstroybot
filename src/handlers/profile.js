@@ -148,8 +148,36 @@ async function handleWebsite(ctx) {
   await ctx.reply(t(lang, 'websiteTitle'), { parse_mode: 'Markdown', disable_web_page_preview: true, ...websiteButton(lang) });
 }
 
+// "🏪 Borib olish" tugmasi — omborlar admin paneldan (warehouses) nomlari bilan keladi
+async function handlePickupInfo(ctx) {
+  const lang = langOf(ctx);
+  const { getCollection } = require('../services/firebase');
+
+  let list = [];
+  try { list = await getCollection('warehouses'); } catch { list = []; }
+  const active = (list || []).filter(w => w.active !== false && w.pickup !== false);
+
+  // Asosiy ombor ro'yxat boshida
+  const main = { id: 'main', name: WAREHOUSE.name, address: WAREHOUSE.address || '', phone: WAREHOUSE.phone || '' };
+  const all = active.find(w => w.id === 'main') ? active : [main, ...active];
+
+  if (!all.length) {
+    return ctx.reply(t(lang, 'pickupInfoEmpty'), { parse_mode: 'Markdown', ...mainMenu(lang) });
+  }
+
+  let text = t(lang, 'pickupInfoTitle');
+  for (const w of all) {
+    const addr = w.address ? `📌 ${w.address}\n` : '';
+    const phone = w.phone ? `📞 ${w.phone}\n` : '';
+    text += t(lang, 'pickupInfoItem', { name: w.name, addr, phone });
+  }
+  text += t(lang, 'pickupInfoFooter');
+
+  await ctx.reply(text, { parse_mode: 'Markdown', disable_web_page_preview: true, ...mainMenu(lang) });
+}
+
 module.exports = {
   handleProfile, handleChangePhone, handleUpdatePhone,
   handleDeliveryInfo, handleCheckMyLocation, handleLocationCheckOnly,
-  handleContact, handleAbout, handleSales, handleWebsite,
+  handleContact, handleAbout, handleSales, handleWebsite, handlePickupInfo,
 };

@@ -3,8 +3,7 @@ const { addDoc, updateDoc, queryDocs, getCollection, addLog } = require('../serv
 const { checkDelivery, WAREHOUSE } = require('../services/delivery');
 const { fmtNum, fmtDate, generateOrderNumber, orderStatusLabel } = require('../utils/helpers');
 const {
-  paymentChoice, confirmOrder, mainMenu, receiveTypeChoice,
-  pickupWarehouseButtons, addressRetryButtons, sendLocationButton, cancelButton,
+  paymentChoice, confirmOrder, mainMenu, addressRetryButtons,
 } = require('../utils/keyboards');
 const { t, langOf } = require('../utils/i18n');
 const { Markup } = require('telegraf');
@@ -20,7 +19,7 @@ function payLabel(lang, payType, isPickup) {
   return isPickup ? t(lang, 'payCashPickup') : t(lang, 'payCash');
 }
 
-// ─── STEP 1: Buyurtmani boshlash → olish turini tanlash ──────────────────────
+// ─── STEP 1: Buyurtmani boshlash → to'g'ridan-to'g'ri yetkazib berish manzili ─
 async function handleOrderStart(ctx) {
   const lang = langOf(ctx);
   if (ctx.callbackQuery) await ctx.answerCbQuery();
@@ -33,93 +32,19 @@ async function handleOrderStart(ctx) {
   }
 
   const total = getCartTotal(ctx.from.id);
-  setSession(ctx.from.id, { orderTotal: total });
-
-  const text = t(lang, 'chooseReceiveType', { summary: buildCartSummary(cart, lang) });
-  if (ctx.callbackQuery) {
-    try { return await ctx.editMessageText(text, { parse_mode: 'Markdown', ...receiveTypeChoice(lang) }); }
-    catch { return await ctx.reply(text, { parse_mode: 'Markdown', ...receiveTypeChoice(lang) }); }
-  }
-  return await ctx.reply(text, { parse_mode: 'Markdown', ...receiveTypeChoice(lang) });
-}
-
-// ─── STEP 1a: Yetkazib berish tanlandi → manzil so'rash ──────────────────────
-async function handleReceiveDelivery(ctx) {
-  const lang = langOf(ctx);
-  await ctx.answerCbQuery();
-  setSession(ctx.from.id, { deliveryType: 'delivery' });
+  setSession(ctx.from.id, { orderTotal: total, deliveryType: 'delivery' });
 
   const kb = Markup.inlineKeyboard([
     [Markup.button.callback(t(lang, 'btnSendLocation'), 'send_location')],
     [Markup.button.callback(t(lang, 'btnTypeAddress'), 'type_address')],
     [Markup.button.callback(t(lang, 'cancel'), 'cancel_order')],
   ]);
-  try {
-    return await ctx.editMessageText(t(lang, 'chooseAddress'), { parse_mode: 'Markdown', ...kb });
-  } catch {
-    return await ctx.reply(t(lang, 'chooseAddress'), { parse_mode: 'Markdown', ...kb });
+  const text = `${buildCartSummary(cart, lang)}\n\n${t(lang, 'chooseAddress')}`;
+  if (ctx.callbackQuery) {
+    try { return await ctx.editMessageText(text, { parse_mode: 'Markdown', ...kb }); }
+    catch { return await ctx.reply(text, { parse_mode: 'Markdown', ...kb }); }
   }
-}
-
-// ─── STEP 1b: Borib olish tanlandi → ombor tanlash ───────────────────────────
-async function handlePickupStart(ctx) {
-  const lang = langOf(ctx);
-  await ctx.answerCbQuery();
-
-  const warehouses = await getPickupWarehouses();
-  if (!warehouses.length) {
-    return ctx.editMessageText(t(lang, 'pickupNoWarehouses'), receiveTypeChoice(lang));
-  }
-  setSession(ctx.from.id, { deliveryType: 'pickup' });
-  try {
-    return await ctx.editMessageText(t(lang, 'pickupChoose'), { parse_mode: 'Markdown', ...pickupWarehouseButtons(warehouses, lang) });
-  } catch {
-    return await ctx.reply(t(lang, 'pickupChoose'), { parse_mode: 'Markdown', ...pickupWarehouseButtons(warehouses, lang) });
-  }
-}
-
-// Omborlar ro'yxati: admin paneldagi `warehouses` + asosiy ombor
-async function getPickupWarehouses() {
-  let list = [];
-  try { list = await getCollection('warehouses'); } catch { list = []; }
-  const active = (list || []).filter(w => w.active !== false && (w.pickup !== false));
-  const main = { id: 'main', name: WAREHOUSE.name, address: WAREHOUSE.address || '', phone: WAREHOUSE.phone || '', lat: WAREHOUSE.lat, lng: WAREHOUSE.lng };
-  // Asosiy ombor allaqachon ro'yxatda bo'lmasa, oldiga qo'shamiz
-  if (!active.find(w => w.id === 'main')) return [main, ...active];
-  return active;
-}
-
-// ─── STEP 1c: Aniq ombor tanlandi → to'lovga o'tish ──────────────────────────
-async function handlePickupSelect(ctx, warehouseId) {
-  const lang = langOf(ctx);
-  await ctx.answerCbQuery();
-
-  const warehouses = await getPickupWarehouses();
-  const wh = warehouses.find(w => w.id === warehouseId) || warehouses[0];
-  if (!wh) return ctx.editMessageText(t(lang, 'pickupNoWarehouses'));
-
-  const total = getCartTotal(ctx.from.id);
-  setSession(ctx.from.id, {
-    step: 'waiting_payment',
-    deliveryType: 'pickup',
-    pickupWarehouseId: wh.id,
-    pickupWarehouseName: wh.name,
-    pickupAddress: wh.address || '',
-    pickupPhone: wh.phone || '',
-    orderAddress: wh.name,
-    orderCity: wh.name,
-    deliveryFee: 0,
-    deliveryDistance: 0,
-    deliveryBreakdown: '',
-  });
-
-  const addrLine = wh.address ? `📌 ${wh.address}\n` : '';
-  const phoneLine = wh.phone ? `📞 ${wh.phone}\n` : '';
-  const text = t(lang, 'pickupSelected', {
-    wh: wh.name, addr: addrLine, phone: phoneLine,
-    som: t(lang, 'som'), total: fmtNum(total), grand: fmtNum(total),
-  });
-  await ctx.editMessageText(text, { parse_mode: 'Markdown', ...paymentChoice(lang, true) });
+  return await ctx.reply(text, { parse_mode: 'Markdown', ...kb });
 }
 
 // ─── STEP 2a: Joylashuv (GPS) qabul qilish ───────────────────────────────────
@@ -547,9 +472,6 @@ async function handleViewMyOrder(ctx, orderId) {
 
 module.exports = {
   handleOrderStart,
-  handleReceiveDelivery,
-  handlePickupStart,
-  handlePickupSelect,
   handleLocationMessage,
   handleTextAddress,
   handlePaymentChoice,

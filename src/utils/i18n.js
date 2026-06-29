@@ -57,6 +57,28 @@ const T = {
   m_about:     { uz: 'ℹ️ Haqida', uz_cyrl: 'ℹ️ Ҳақида', ru: 'ℹ️ О нас', en: 'ℹ️ About' },
   m_sales:     { uz: '⭐ Aksiyalar', uz_cyrl: '⭐ Акциялар', ru: '⭐ Акции', en: '⭐ Promotions' },
   m_language:  { uz: '🌐 Til', uz_cyrl: '🌐 Тил', ru: '🌐 Язык', en: '🌐 Language' },
+  m_pickup:    { uz: '🏪 Borib olish', uz_cyrl: '🏪 Бориб олиш', ru: '🏪 Самовывоз', en: '🏪 Pickup' },
+
+  // ── BORIB OLISH MANZILLARI ──
+  pickupInfoTitle: {
+    uz: "🏪 *Borib olish — manzillarimiz*\n\nBuyurtmangizni quyidagi omborlarimizdan bemalol kelib olib ketishingiz mumkin (bepul):\n",
+    uz_cyrl: '🏪 *Бориб олиш — манзилларимиз*\n\nБуюртмангизни қуйидаги омборларимиздан бемалол келиб олиб кетишингиз мумкин (бепул):\n',
+    ru: '🏪 *Самовывоз — наши адреса*\n\nВы можете свободно забрать свой заказ с наших складов (бесплатно):\n',
+    en: '🏪 *Pickup — our locations*\n\nYou can freely collect your order from our warehouses (free):\n',
+  },
+  pickupInfoItem: { uz: '\n🏭 *{name}*\n{addr}{phone}', uz_cyrl: '\n🏭 *{name}*\n{addr}{phone}', ru: '\n🏭 *{name}*\n{addr}{phone}', en: '\n🏭 *{name}*\n{addr}{phone}' },
+  pickupInfoFooter: {
+    uz: "\n\n_⏰ Ish vaqti: Du–Sh 09:00–18:00, Yak 10:00–15:00. Bemalol keling!_",
+    uz_cyrl: '\n\n_⏰ Иш вақти: Ду–Ш 09:00–18:00, Як 10:00–15:00. Бемалол келинг!_',
+    ru: '\n\n_⏰ Часы работы: Пн–Сб 09:00–18:00, Вс 10:00–15:00. Добро пожаловать!_',
+    en: '\n\n_⏰ Hours: Mon–Sat 09:00–18:00, Sun 10:00–15:00. Welcome!_',
+  },
+  pickupInfoEmpty: {
+    uz: "🏪 Hozircha borib olish manzillari qo'shilmagan.\n\nTez orada qo'shiladi yoki yetkazib berish xizmatidan foydalaning.",
+    uz_cyrl: '🏪 Ҳозирча бориб олиш манзиллари қўшилмаган.\n\nТез орада қўшилади ёки етказиб бериш хизматидан фойдаланинг.',
+    ru: '🏪 Адреса самовывоза пока не добавлены.\n\nСкоро добавим или воспользуйтесь доставкой.',
+    en: '🏪 No pickup locations added yet.\n\nComing soon, or use the delivery service.',
+  },
 
   // ── ADMIN MENYU TUGMALARI ──
   am_dashboard:  { uz: '📊 Dashboard', uz_cyrl: '📊 Дашборд', ru: '📊 Панель', en: '📊 Dashboard' },

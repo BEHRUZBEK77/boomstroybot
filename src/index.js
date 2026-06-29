@@ -12,7 +12,7 @@ const { handleStart, handleContact: handleContactMsg, handleHelp, handleCheckSub
 const { handleCatalog, handleCategoryCallback, handleProductCallback, handleProductDetail, performSearch } = require('./handlers/catalog');
 const { handleViewCart, handleAddToCart, handleDecFromCart, handleClearCart } = require('./handlers/cart');
 const {
-  handleOrderStart, handleReceiveDelivery, handlePickupStart, handlePickupSelect,
+  handleOrderStart,
   handleLocationMessage, handleTextAddress,
   handlePaymentChoice, handlePaymentPhoto, handleOrderConfirm,
   handleCancelOrder, handleMyOrders, handleViewMyOrder,
@@ -20,13 +20,14 @@ const {
 const {
   handleProfile, handleChangePhone, handleUpdatePhone,
   handleDeliveryInfo, handleCheckMyLocation, handleLocationCheckOnly,
-  handleContact, handleAbout, handleSales, handleWebsite,
+  handleContact, handleAbout, handleSales, handleWebsite, handlePickupInfo,
 } = require('./handlers/profile');
 const {
   isAdmin, handleAdminDashboard, handleAdminOrders, handleAdminViewOrder,
   updateOrderStatus, handlePaymentApprove,
   handleAdminProducts, handleAdminLowStock, handleAdminCustomers,
   handleAdminStats, handleAdminBroadcast, handleBroadcastMessage,
+  handleAdminWarehouses, handleWarehouseAddStart, handleWarehouseInput, handleWarehouseDelete,
 } = require('./handlers/admin');
 const {
   handleLoyaltyMenu, handleLoyaltyBalance, handleDailyBonus, handleLoyaltyTiers,
@@ -85,6 +86,7 @@ bot.hears(variantsOf('m_profile'), handleProfile);
 bot.hears(variantsOf('m_favorites'), handleViewFavorites);
 bot.hears(variantsOf('m_loyalty'), handleLoyaltyMenu);
 bot.hears(variantsOf('m_delivery'), handleDeliveryInfo);
+bot.hears(variantsOf('m_pickup'), handlePickupInfo);
 bot.hears(variantsOf('m_contact'), handleContact);
 bot.hears(variantsOf('m_about'), handleAbout);
 bot.hears(variantsOf('m_sales'), handleSales);
@@ -96,21 +98,7 @@ bot.hears(variantsOf('am_dashboard'), handleAdminDashboard);
 bot.hears(variantsOf('am_products'), handleAdminProducts);
 bot.hears(variantsOf('am_orders'), (ctx) => handleAdminOrders(ctx, 'all'));
 bot.hears(variantsOf('am_customers'), handleAdminCustomers);
-bot.hears(variantsOf('am_warehouses'), async (ctx) => {
-  if (!isAdmin(ctx)) return;
-  const { getCollection } = require('./services/firebase');
-  const { WAREHOUSE } = require('./services/delivery');
-  const warehouses = await getCollection('warehouses');
-  const products = await getCollection('products');
-  let text = '🏭 *Omborlar*\n\n';
-  const allWh = [{ id: 'main', name: WAREHOUSE.name }, ...warehouses];
-  allWh.forEach(w => {
-    const cnt = products.filter(p => (p.warehouse || 'main') === w.id).length;
-    text += `🏭 ${w.name}: ${cnt} ta mahsulot\n`;
-  });
-  text += `\n_Borib olish omborlari shu ro'yxatdan olinadi._`;
-  ctx.reply(text, { parse_mode: 'Markdown' });
-});
+bot.hears(variantsOf('am_warehouses'), handleAdminWarehouses);
 bot.hears(variantsOf('am_stats'), handleAdminStats);
 bot.hears(variantsOf('am_broadcast'), handleAdminBroadcast);
 bot.hears(variantsOf('am_settings'), async (ctx) => {
@@ -160,6 +148,9 @@ bot.on('text', async (ctx) => {
     case 'searching': return performSearch(ctx, text);
     case 'waiting_text_address': return handleTextAddress(ctx);
     case 'admin_broadcast': return handleBroadcastMessage(ctx);
+    case 'admin_wh_name':
+    case 'admin_wh_address':
+    case 'admin_wh_phone': return handleWarehouseInput(ctx);
     case 'change_phone': return ctx.reply(t(langOf(ctx), 'phoneShareHint'));
     case 'entering_promo': return handlePromoCodeText(ctx);
     case 'writing_review': return handleReviewTextSave(ctx);
@@ -204,9 +195,6 @@ bot.on('callback_query', async (ctx) => {
 
     // Order flow
     if (data === 'order_start') return handleOrderStart(ctx);
-    if (data === 'recv_delivery') return handleReceiveDelivery(ctx);
-    if (data === 'recv_pickup') return handlePickupStart(ctx);
-    if (data.startsWith('pickup_wh:')) return handlePickupSelect(ctx, data.slice(10));
     if (data === 'send_location') {
       await ctx.answerCbQuery();
       const { sendLocationButton } = require('./utils/keyboards');
@@ -331,6 +319,11 @@ bot.on('callback_query', async (ctx) => {
     if (data === 'admin_low_stock') return handleAdminLowStock(ctx);
     if (data === 'admin_customers') return handleAdminCustomers(ctx);
     if (data === 'admin_stats') return handleAdminStats(ctx);
+
+    // Omborlar boshqaruvi
+    if (data === 'admin_warehouses') return handleAdminWarehouses(ctx);
+    if (data === 'wh_add') return handleWarehouseAddStart(ctx);
+    if (data.startsWith('wh_del:')) return handleWarehouseDelete(ctx, data.slice(7));
 
     if (data.startsWith('admin_confirm:')) return updateOrderStatus(ctx, data.slice(14), 'confirmed');
     if (data.startsWith('admin_cancel:')) return updateOrderStatus(ctx, data.slice(13), 'cancelled');

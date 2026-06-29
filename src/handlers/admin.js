@@ -393,10 +393,87 @@ async function handleBroadcastMessage(ctx) {
   await ctx.reply(`✅ Jo'natildi: ${success}\n❌ Xato: ${failed}`, adminMainMenu());
 }
 
+// ─── OMBORLAR (borib olish manzillari) ────────────────────────────────────────
+async function handleAdminWarehouses(ctx) {
+  if (!isAdmin(ctx)) return;
+  if (ctx.callbackQuery) await ctx.answerCbQuery();
+
+  const { getCollection } = require('../services/firebase');
+  const { WAREHOUSE } = require('../services/delivery');
+  const warehouses = await getCollection('warehouses');
+  const products = await getCollection('products');
+
+  let text = '🏭 *Omborlar (borib olish manzillari)*\n\n';
+  text += `🏠 *Asosiy ombor:* ${WAREHOUSE.name}\n`;
+  if (WAREHOUSE.address) text += `📌 ${WAREHOUSE.address}\n`;
+  text += '\n';
+
+  if (!warehouses.length) {
+    text += `_Qo'shimcha omborlar yo'q. "➕ Ombor qo'shish" orqali qo'shing._\n`;
+  } else {
+    warehouses.forEach((w, i) => {
+      const cnt = products.filter(p => (p.warehouse || 'main') === w.id).length;
+      text += `${i + 1}. 🏪 *${w.name}*\n`;
+      if (w.address) text += `   📌 ${w.address}\n`;
+      if (w.phone) text += `   📞 ${w.phone}\n`;
+      text += `   📦 ${cnt} ta mahsulot\n`;
+    });
+  }
+  text += `\n_Bu omborlar foydalanuvchilarga "🏪 Borib olish" bo'limida ko'rinadi._`;
+
+  const rows = [[Markup.button.callback("➕ Ombor qo'shish", 'wh_add')]];
+  warehouses.forEach(w => rows.push([Markup.button.callback(`🗑️ ${w.name}`, `wh_del:${w.id}`)]));
+
+  if (ctx.callbackQuery) {
+    try { return ctx.editMessageText(text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(rows) }); } catch { }
+  }
+  await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(rows) });
+}
+
+async function handleWarehouseAddStart(ctx) {
+  if (!isAdmin(ctx)) return ctx.answerCbQuery('Ruxsat yo\'q');
+  await ctx.answerCbQuery();
+  setSession(ctx.from.id, { step: 'admin_wh_name', newWarehouse: {} });
+  await ctx.reply('🏪 Yangi ombor *nomini* yozing:\n\n_Masalan: Chilonzor filiali_', { parse_mode: 'Markdown' });
+}
+
+async function handleWarehouseInput(ctx) {
+  if (!isAdmin(ctx)) return;
+  const s = getSession(ctx.from.id);
+  const text = (ctx.message.text || '').trim();
+  const skip = text === '-' || text.toLowerCase() === 'skip';
+
+  if (s.step === 'admin_wh_name') {
+    setSession(ctx.from.id, { step: 'admin_wh_address', newWarehouse: { ...s.newWarehouse, name: text } });
+    return ctx.reply('📌 Ombor *manzilini* yozing (yoki "-" deb tashlab keting):', { parse_mode: 'Markdown' });
+  }
+  if (s.step === 'admin_wh_address') {
+    setSession(ctx.from.id, { step: 'admin_wh_phone', newWarehouse: { ...s.newWarehouse, address: skip ? '' : text } });
+    return ctx.reply('📞 Ombor *telefon raqamini* yozing (yoki "-"):', { parse_mode: 'Markdown' });
+  }
+  if (s.step === 'admin_wh_phone') {
+    const { addDoc } = require('../services/firebase');
+    const wh = { ...s.newWarehouse, phone: skip ? '' : text, active: true, pickup: true };
+    await addDoc('warehouses', wh);
+    setSession(ctx.from.id, { step: null, newWarehouse: null });
+    await ctx.reply(`✅ Ombor qo'shildi: *${wh.name}*\n\nEndi u "🏪 Borib olish" bo'limida ko'rinadi.`, { parse_mode: 'Markdown', ...adminMainMenu() });
+    return handleAdminWarehouses(ctx);
+  }
+}
+
+async function handleWarehouseDelete(ctx, id) {
+  if (!isAdmin(ctx)) return ctx.answerCbQuery('Ruxsat yo\'q');
+  const { deleteDocById } = require('../services/firebase');
+  await deleteDocById('warehouses', id).catch(() => { });
+  await ctx.answerCbQuery('🗑️ O\'chirildi');
+  return handleAdminWarehouses(ctx);
+}
+
 module.exports = {
   isAdmin,
   handleAdminDashboard, handleAdminOrders, handleAdminViewOrder,
   updateOrderStatus, handlePaymentApprove,
   handleAdminProducts, handleAdminLowStock, handleAdminCustomers,
   handleAdminStats, handleAdminBroadcast, handleBroadcastMessage,
+  handleAdminWarehouses, handleWarehouseAddStart, handleWarehouseInput, handleWarehouseDelete,
 };
