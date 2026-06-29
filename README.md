@@ -94,6 +94,7 @@ Bot quyidagi kolleksiyalar bilan ishlaydi (admin panel orqali boshqariladi):
 | `warehouses` | **Borib olish omborlari** — `{ name, address?, phone?, lat?, lng?, active? }` |
 | `rewards` | **Sovg'alar do'koni** — `{ name, pointsCost, description?, stock?, imageUrl?, active? }` |
 | `rewardRedemptions` | Ballga olingan sovg'a so'rovlari |
+| `announcements` | **E'lon / Aksiya** — `{ text, title?, type?, imageUrl?, active? }` (yangi hujjat → barchaga yuboriladi) |
 | `promoCodes` | Promo-kodlar |
 | `reviews` | Mahsulot sharhlari |
 | `supportTickets` | Murojaatlar |
@@ -105,6 +106,27 @@ yashiriladi. Asosiy ombor (`WAREHOUSE_NAME`) ro'yxat boshida avtomatik qo'shilad
 ### Sovg'alar (`rewards`)
 `pointsCost` — ball narxi. `stock` berilsa, har olishda 1 taga kamayadi va
 tugaganda yashiriladi. Foydalanuvchi ballari yetsa "🎁 Sovg'ani olish" tugmasi chiqadi.
+
+---
+
+## 🔔 Real-vaqt xabarnomalar (`services/watchers.js`)
+
+Bot Firestore'ni real vaqtda kuzatadi — xabarlar **qayerda o'zgartirilganidan
+qat'i nazar** (veb admin panel yoki Telegram) foydalanuvchiga 100% yetkaziladi:
+
+- **Buyurtma holati** — `orders` hujjatidagi `status` o'zgarsa, mijozga uning
+  tilida avtomatik xabar boradi (tasdiqlandi / yo'lda / tayyor / yetkazildi /
+  bekor). Takrorlanmaslik uchun `lastNotifiedStatus` ishlatiladi.
+- **E'lon / Aksiya** — `announcements` kolleksiyasiga yangi hujjat qo'shilsa,
+  barcha (bloklanmagan) foydalanuvchilarga yuboriladi. Takror yuborilmasligi
+  uchun `sentToTelegram: true` qo'yiladi.
+
+E'lon hujjati ko'p tilli bo'lishi mumkin: `text_uz`, `text_uz_cyrl`, `text_ru`,
+`text_en` (yoki oddiy `text`). `type: 'promo'` bo'lsa ⭐, aks holda 📢 belgisi
+qo'yiladi. `imageUrl` berilsa rasm bilan yuboriladi.
+
+> ℹ️ Birinchi ishga tushganda mavjud eski buyurtma/e'lonlar **jimgina belgilanadi**
+> (spam bo'lmasligi uchun). Shundan keyingi har bir o'zgarish 100% yuboriladi.
 
 ---
 
