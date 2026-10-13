@@ -6,8 +6,17 @@ const { T_KEYS_EMOJIS } = require('./premiumEmojiList');
 
 function isAdminCtx(ctx) { return ctx.state?.isAdmin; }
 
+async function notAdmin(ctx) {
+  console.log(`ℹ️ Admin bo'lmagan foydalanuvchi admin buyrug'ini yubordi: ${ctx.from.id}`);
+  return ctx.reply(
+    `⛔ Bu buyruq faqat adminlar uchun.\n\nSizning Telegram ID: \`${ctx.from.id}\`\n` +
+    `Admin bo'lish uchun Railway → Variables → ADMIN_TELEGRAM_ID ga shu raqamni qo'shing.`,
+    { parse_mode: 'Markdown' }
+  );
+}
+
 async function handleEmojiCommand(ctx) {
-  if (!isAdminCtx(ctx)) return;
+  if (!isAdminCtx(ctx)) return notAdmin(ctx);
   const arg = (ctx.message?.text || '').split(/\s+/)[1];
   if (arg === 'reset') {
     premium.state.map = {};
@@ -16,8 +25,8 @@ async function handleEmojiCommand(ctx) {
     return ctx.reply("🧹 Barcha premium emoji bog'lanishlari o'chirildi.");
   }
 
-  const mapped = Object.keys(premium.state.map);
-  const suggestions = T_KEYS_EMOJIS.filter(e => !premium.state.map[e]).slice(0, 40).join(' ');
+  const mapped = Object.keys(premium.effectiveMap());
+  const suggestions = T_KEYS_EMOJIS.filter(e => !premium.effectiveMap()[e]).slice(0, 40).join(' ');
 
   setSession(ctx.from.id, { step: 'premium_emoji' });
   await ctx.reply(
@@ -64,7 +73,7 @@ async function handlePremiumEmojiText(ctx) {
 }
 
 async function handleStickerCommand(ctx) {
-  if (!isAdminCtx(ctx)) return;
+  if (!isAdminCtx(ctx)) return notAdmin(ctx);
   const rows = Object.entries(premium.STICKER_SLOTS).map(([slot, label]) => {
     const has = premium.state.stickers[slot];
     return [

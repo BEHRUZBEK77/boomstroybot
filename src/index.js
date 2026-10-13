@@ -69,6 +69,20 @@ setBotInstance(bot);
     if (payload && payload.reply_markup && typeof payload.reply_markup === 'object') {
       payload = { ...payload, reply_markup: premium.decorateMarkup(payload.reply_markup) };
     }
+    // Xabar matnidagi oddiy emojilar → premium emoji
+    const withEmoji = premium.decorateText(method, payload);
+    if (withEmoji) {
+      try {
+        const res = await callApi(method, withEmoji, opts);
+        premium.textWorked();
+        return res;
+      } catch (e) {
+        const desc = String(e.description || e.message || '');
+        if (!/emoji|ENTITY|entities|DOCUMENT_INVALID|PREMIUM/i.test(desc)) throw e;
+        premium.disableText(desc);
+        // asl (premium'siz) variant bilan davom etamiz
+      }
+    }
     try {
       return await callApi(method, payload, opts);
     } catch (e) {
@@ -533,6 +547,7 @@ async function startBot() {
       status.botUsername = me.username;
       bot.botInfo = me;
       console.log(`🤖 Bot: @${me.username} (id ${me.id})`);
+      await require('./utils/premium').autoLoadEmoji(bot.telegram);
       break;
     } catch (e) {
       const code = e.response?.error_code;

@@ -11,9 +11,12 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 const state = {
-  map: {},          // oddiy emoji -> custom_emoji_id
+  map: {},          // admin qo'lda bog'lagan: oddiy emoji -> custom_emoji_id (ustun turadi)
+  auto: {},         // Telegram rasmiy animatsion emojilaridan avtomatik
   stickers: {},     // slot -> sticker file_id
   iconsDisabled: false, // Telegram rad etsa (egasida Premium yo'q) — avtomatik o'chiriladi
+  textDisabled: false,  // xabar matnidagi premium emoji uchun xuddi shunday
+  textOkLogged: false,
   loaded: false,
 };
 
@@ -65,9 +68,43 @@ function stripLeadingEmoji(text) {
   return rest;
 }
 
+function effectiveMap() { return { ...state.auto, ...state.map }; }
+
 function customIdFor(emoji) {
   if (!emoji || state.iconsDisabled) return null;
-  return state.map[emoji] || state.map[baseEmoji(emoji)] || null;
+  const m = effectiveMap();
+  return m[emoji] || m[baseEmoji(emoji)] || null;
+}
+
+// Ma'nosi bir xil bo'lgan o'xshash emojilar (to'plamda aynan shunisi bo'lmasa)
+const ALIASES = { '🔍': '🔎', '📂': '📁', '📊': '📈', '📞': '📱', '☎': '📱', '💵': '💰', '💸': '💰' };
+
+// Telegram'ning rasmiy animatsion custom emojilarini yuklaydi (har qanday bot uchun ochiq).
+// Qo'shimcha to'plamlar: PREMIUM_EMOJI_PACKS=pack1,pack2 (t.me/addemoji/<nom>)
+async function autoLoadEmoji(telegram) {
+  const auto = {};
+  const add = (st) => {
+    if (!st?.custom_emoji_id || !st.emoji) return;
+    const k = baseEmoji(st.emoji);
+    if (!auto[k]) auto[k] = st.custom_emoji_id;
+  };
+  try {
+    const icons = await telegram.callApi('getForumTopicIconStickers', {});
+    (icons || []).forEach(add);
+  } catch (e) {
+    console.warn('Premium emoji (rasmiy) yuklanmadi:', e.message);
+  }
+  for (const name of String(process.env.PREMIUM_EMOJI_PACKS || '').split(',').map(x => x.trim()).filter(Boolean)) {
+    try {
+      const set = await telegram.callApi('getStickerSet', { name });
+      (set?.stickers || []).forEach(add);
+    } catch (e) {
+      console.warn(`Premium emoji to'plami "${name}" yuklanmadi:`, e.message);
+    }
+  }
+  for (const [from, to] of Object.entries(ALIASES)) if (!auto[from] && auto[to]) auto[from] = auto[to];
+  state.auto = auto;
+  console.log(`✨ Premium emoji: ${Object.keys(auto).length} ta avtomatik (${Object.keys(auto).slice(0, 40).join('')}), qo'lda: ${Object.keys(state.map).length}`);
 }
 
 // ── Tugma ranglari (callback_data bo'yicha) ──────────────────────────────────
@@ -144,7 +181,8 @@ function stripIcons(markup) {
     if (!b || !b.icon_custom_emoji_id) return b;
     const { icon_custom_emoji_id, ...rest } = b;
     // Ikonka o'rniga oddiy emojini matnga qaytaramiz
-    const emoji = Object.keys(state.map).find(k => state.map[k] === icon_custom_emoji_id);
+    const m = effectiveMap();
+    const emoji = Object.keys(m).find(k => m[k] === icon_custom_emoji_id);
     return { ...rest, text: emoji ? `${emoji} ${rest.text}` : rest.text };
   };
   if (markup?.inline_keyboard) return { ...markup, inline_keyboard: markup.inline_keyboard.map(r => r.map(strip)) };
@@ -155,6 +193,52 @@ function disableIcons(reason) {
   if (state.iconsDisabled) return;
   state.iconsDisabled = true;
   console.warn(`⚠️ Premium ikonkalar o'chirildi: ${reason}. Bot egasida Telegram Premium faolligini tekshiring.`);
+}
+
+// ── Xabar matnidagi premium emoji ───────────────────────────────────────────
+const TEXT_METHODS = {
+  sendMessage: ['text', 'entities'],
+  editMessageText: ['text', 'entities'],
+  sendPhoto: ['caption', 'caption_entities'],
+  sendVideo: ['caption', 'caption_entities'],
+  sendAnimation: ['caption', 'caption_entities'],
+  sendDocument: ['caption', 'caption_entities'],
+  editMessageCaption: ['caption', 'caption_entities'],
+};
+
+// Markdown matnni entities'ga o'girib, oddiy emojilarga premium emoji qo'shadi.
+// O'zgartirish kerak bo'lmasa — null qaytaradi.
+function decorateText(method, payload) {
+  if (state.textDisabled) return null;
+  const map = effectiveMap();
+  if (!Object.keys(map).length) return null;
+  const spec = TEXT_METHODS[method];
+  if (!spec) return null;
+  const [field, entField] = spec;
+  const text = payload[field];
+  if (typeof text !== 'string' || !text) return null;
+  if (payload[entField]) return null;
+  const pm = payload.parse_mode;
+  if (pm && pm !== 'Markdown') return null; // HTML/MarkdownV2 ga tegmaymiz
+
+  const { parseMarkdownV1, addCustomEmoji } = require('./mdEntities');
+  const parsed = pm === 'Markdown' ? parseMarkdownV1(text) : { text, entities: [] };
+  const entities = addCustomEmoji(parsed.text, parsed.entities, map);
+  if (!entities.some(e => e.type === 'custom_emoji')) return null;
+
+  const out = { ...payload, [field]: parsed.text, [entField]: entities };
+  delete out.parse_mode;
+  return out;
+}
+function disableText(reason) {
+  if (state.textDisabled) return;
+  state.textDisabled = true;
+  console.warn(`⚠️ Xabarlardagi premium emoji o'chirildi: ${reason}. Bot egasida (BotFather'da botni yaratgan akkauntda) Telegram Premium bo'lishi kerak.`);
+}
+function textWorked() {
+  if (state.textOkLogged) return;
+  state.textOkLogged = true;
+  console.log('✨ Premium emoji xabarda muvaffaqiyatli yuborildi');
 }
 
 // ── Stikerlar ────────────────────────────────────────────────────────────────
@@ -168,4 +252,5 @@ module.exports = {
   state, STICKER_SLOTS, loadPremium, save,
   splitLeadingEmoji, stripLeadingEmoji, baseEmoji,
   decorateMarkup, hasIcons, stripIcons, disableIcons, sendSticker,
+  decorateText, disableText, textWorked, autoLoadEmoji, effectiveMap,
 };
