@@ -54,62 +54,72 @@ if (!BOT_TOKEN) {
   console.error('❌ BOT_TOKEN o\'rnatilmagan! .env faylida BOT_TOKEN ni belgilang.');
   process.exit(1);
 }
-const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: 60_000 });
+const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: 60_000, telegram: { webhookReply: false } });
 setBotInstance(bot);
 
-// ── TELEGRAM API HIMOYASI ─────────────────────────────────────────────────────
-// 1) Matnda Markdown buzilsa (masalan, mahsulot nomida "_" yoki "*") — xabar
-//    formatlashsiz qayta yuboriladi, foydalanuvchi xato ko'rmaydi.
-// 2) "message is not modified" / eskirgan callback — zararsiz, jimgina o'tkaziladi.
+// ── TELEGRAM API QATLAMI ──────────────────────────────────────────────────────
+// MUHIM: Telegraf webhook rejimida HAR BIR update uchun yangi Telegram obyekti
+// yaratadi (ctx.telegram !== bot.telegram). Shuning uchun qatlam prototipga
+// o'rnatiladi — shunda ctx.reply, ctx.editMessageText va h.k. ham undan o'tadi.
+//  1) Rangli tugmalar + premium emoji (tugmalarda va xabar matnida)
+//  2) Markdown buzilsa — xabar formatsiz qayta yuboriladi
+//  3) Rasmli xabarni tahrirlab bo'lmasa — yangi xabar yuboriladi
+//  4) "message is not modified" / eskirgan callback — jimgina o'tkaziladi
 {
-  const callApi = bot.telegram.callApi.bind(bot.telegram);
+  const { Telegram } = require('telegraf');
   const premium = require('./utils/premium');
-  bot.telegram.callApi = async (method, payload = {}, opts) => {
-    // Rangli tugmalar + premium emoji ikonkalari (barcha klaviaturalarga markazlashgan holda)
-    if (payload && payload.reply_markup && typeof payload.reply_markup === 'object') {
-      payload = { ...payload, reply_markup: premium.decorateMarkup(payload.reply_markup) };
-    }
-    // Xabar matnidagi oddiy emojilar → premium emoji
-    const withEmoji = premium.decorateText(method, payload);
-    if (withEmoji) {
+  const rawCallApi = Telegram.prototype.callApi;
+  if (!rawCallApi.__boomstroy) {
+    const wrapped = async function (method, payload = {}, opts) {
+      const call = (m, p) => rawCallApi.call(this, m, p, opts);
+
+      if (payload && payload.reply_markup && typeof payload.reply_markup === 'object') {
+        payload = { ...payload, reply_markup: premium.decorateMarkup(payload.reply_markup) };
+      }
+
+      const withEmoji = premium.decorateText(method, payload);
+      if (withEmoji) {
+        try {
+          const res = await call(method, withEmoji);
+          premium.textWorked();
+          return res;
+        } catch (e) {
+          const desc = String(e.description || e.message || '');
+          if (!/emoji|ENTITY|entities|DOCUMENT_INVALID|PREMIUM/i.test(desc)) throw e;
+          premium.disableText(desc);
+        }
+      }
+
       try {
-        const res = await callApi(method, withEmoji, opts);
-        premium.textWorked();
+        const res = await call(method, payload);
+        if (premium.hasIcons(payload.reply_markup)) premium.iconsWorked();
         return res;
       } catch (e) {
         const desc = String(e.description || e.message || '');
-        if (!/emoji|ENTITY|entities|DOCUMENT_INVALID|PREMIUM/i.test(desc)) throw e;
-        premium.disableText(desc);
-        // asl (premium'siz) variant bilan davom etamiz
+        if (premium.hasIcons(payload.reply_markup) && /emoji|icon|BUTTON|DOCUMENT_INVALID|STICKER|PREMIUM/i.test(desc)) {
+          premium.disableIcons(desc);
+          return call(method, { ...payload, reply_markup: premium.stripIcons(payload.reply_markup) });
+        }
+        if (/message is not modified/i.test(desc)) return true;
+        if (method === 'editMessageText' && payload.chat_id &&
+          /no text in the message to edit|message to edit not found|message can't be edited/i.test(desc)) {
+          const { message_id, inline_message_id, ...rest } = payload;
+          return this.callApi('sendMessage', rest, opts);
+        }
+        if (method === 'answerCallbackQuery' && /query is too old|query ID is invalid/i.test(desc)) return true;
+        if (/can't parse entities/i.test(desc)) {
+          const plain = { ...payload };
+          delete plain.parse_mode;
+          if (Array.isArray(plain.media)) plain.media = plain.media.map(({ parse_mode, ...m }) => m);
+          console.warn(`⚠️ ${method}: Markdown xatosi, formatsiz qayta yuborildi`);
+          return call(method, plain);
+        }
+        throw e;
       }
-    }
-    try {
-      return await callApi(method, payload, opts);
-    } catch (e) {
-      const desc = String(e.description || e.message || '');
-      // Premium ikonka rad etildi (egasida Premium yo'q) — ikonkasiz qayta yuboramiz
-      if (premium.hasIcons(payload.reply_markup) && /emoji|icon|BUTTON|DOCUMENT_INVALID|STICKER/i.test(desc)) {
-        premium.disableIcons(desc);
-        return callApi(method, { ...payload, reply_markup: premium.stripIcons(payload.reply_markup) }, opts);
-      }
-      if (/message is not modified/i.test(desc)) return true;
-      // Rasmli xabarni matnga tahrirlab bo'lmaydi / xabar o'chirilgan — yangi xabar yuboramiz
-      if (method === 'editMessageText' && payload.chat_id &&
-        /no text in the message to edit|message to edit not found|message can't be edited/i.test(desc)) {
-        const { message_id, inline_message_id, ...rest } = payload;
-        return bot.telegram.callApi('sendMessage', rest, opts);
-      }
-      if (method === 'answerCallbackQuery' && /query is too old|query ID is invalid/i.test(desc)) return true;
-      if (/can't parse entities/i.test(desc)) {
-        const plain = { ...payload };
-        delete plain.parse_mode;
-        if (Array.isArray(plain.media)) plain.media = plain.media.map(({ parse_mode, ...m }) => m);
-        console.warn(`⚠️ ${method}: Markdown xatosi, formatsiz qayta yuborildi`);
-        return callApi(method, plain, opts);
-      }
-      throw e;
-    }
-  };
+    };
+    wrapped.__boomstroy = true;
+    Telegram.prototype.callApi = wrapped;
+  }
 }
 
 // ── MIDDLEWARE ────────────────────────────────────────────────────────────────

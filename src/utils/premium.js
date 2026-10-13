@@ -235,6 +235,11 @@ function disableText(reason) {
   state.textDisabled = true;
   console.warn(`⚠️ Xabarlardagi premium emoji o'chirildi: ${reason}. Bot egasida (BotFather'da botni yaratgan akkauntda) Telegram Premium bo'lishi kerak.`);
 }
+function iconsWorked() {
+  if (state.iconsOkLogged) return;
+  state.iconsOkLogged = true;
+  console.log('✨ Premium ikonkali tugmalar muvaffaqiyatli yuborildi');
+}
 function textWorked() {
   if (state.textOkLogged) return;
   state.textOkLogged = true;
@@ -252,5 +257,5 @@ module.exports = {
   state, STICKER_SLOTS, loadPremium, save,
   splitLeadingEmoji, stripLeadingEmoji, baseEmoji,
   decorateMarkup, hasIcons, stripIcons, disableIcons, sendSticker,
-  decorateText, disableText, textWorked, autoLoadEmoji, effectiveMap,
+  decorateText, disableText, textWorked, iconsWorked, autoLoadEmoji, effectiveMap,
 };
