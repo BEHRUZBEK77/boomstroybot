@@ -24,7 +24,7 @@ async function handleAdminDashboard(ctx) {
     getCollection('stockIns'),
   ]);
 
-  const lowStock = products.filter(p => getStockStatus(p).val !== 'ok');
+  const lowStock = products.filter(p => (getStockStatus(p).val !== 'ok'));
   const pendingOrders = orders.filter(o => o.status === 'pending' || o.status === 'paid_pending');
   const totalRevenue = orders.filter(o => o.status === 'delivered').reduce((s, o) => s + (o.grandTotal || 0), 0);
   const todayOrders = orders.filter(o => {
@@ -211,7 +211,7 @@ async function handleAdminProducts(ctx) {
   if (ctx.callbackQuery) await ctx.answerCbQuery();
 
   const products = await getCollection('products');
-  const lowStock = products.filter(p => getStockStatus(p).val !== 'ok');
+  const lowStock = products.filter(p => (getStockStatus(p).val !== 'ok'));
 
   const text =
     `📦 *Mahsulotlar* (${products.length} ta)\n` +
@@ -236,7 +236,7 @@ async function handleAdminLowStock(ctx) {
   if (ctx.callbackQuery) await ctx.answerCbQuery();
 
   const products = await getCollection('products');
-  const low = products.filter(p => getStockStatus(p).val !== 'ok');
+  const low = products.filter(p => (getStockStatus(p).val !== 'ok'));
 
   if (!low.length) {
     const msg = '✅ Barcha mahsulotlar normal miqdorda!';

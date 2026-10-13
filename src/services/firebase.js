@@ -56,7 +56,21 @@ function getStorage() {
 
 // ─── CRUD HELPERS ───────────────────────────────────────────────────────────
 
+// Mahsulotlar xotiradagi jonli katalogdan olinadi (services/catalog.js)
+function catalogOrNull() {
+  const catalog = require('./catalog');
+  return catalog.isReady() ? catalog : null;
+}
+function normalizeProducts(list) {
+  const { normalizeProduct } = require('./catalog');
+  return list.map(p => normalizeProduct(p.id, p));
+}
+
 async function getCollection(col, orderField = 'createdAt', dir = 'desc') {
+  if (col === 'products') {
+    const c = catalogOrNull();
+    if (c) return c.allProducts();
+  }
   const cacheKey = `${col}:${orderField}:${dir}`;
   if (CACHEABLE.has(col)) {
     const hit = cache.get(cacheKey);
@@ -71,15 +85,21 @@ async function getCollection(col, orderField = 'createdAt', dir = 'desc') {
     const snap = await db.collection(col).get();
     data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
   }
+  if (col === 'products') data = normalizeProducts(data);
   if (CACHEABLE.has(col)) cache.set(cacheKey, { data, ts: Date.now() });
   return data;
 }
 
 async function getDoc(col, id) {
+  if (col === 'products') {
+    const c = catalogOrNull();
+    if (c) return c.getProduct(id);
+  }
   const db = getDb();
   const doc = await db.collection(col).doc(id).get();
   if (!doc.exists) return null;
-  return { id: doc.id, ...doc.data() };
+  const data = { id: doc.id, ...doc.data() };
+  return col === 'products' ? normalizeProducts([data])[0] : data;
 }
 
 async function addDoc(col, data) {
@@ -105,6 +125,10 @@ async function deleteDocById(col, id) {
 }
 
 async function queryDocs(col, field, op, value) {
+  if (col === 'products' && op === '==') {
+    const c = catalogOrNull();
+    if (c) return c.allProducts().filter(p => p[field] === value);
+  }
   const db = getDb();
   const snap = await db.collection(col).where(field, op, value).get();
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -163,6 +187,10 @@ async function setDocById(col, id, data, merge = true) {
 
 async function getDocsByIds(col, ids = []) {
   if (!ids.length) return [];
+  if (col === 'products') {
+    const c = catalogOrNull();
+    if (c) return ids.map(id => c.getProduct(id)).filter(Boolean);
+  }
   const db = getDb();
   const chunks = [];
   for (let i = 0; i < ids.length; i += 10) chunks.push(ids.slice(i, i + 10));

@@ -4,14 +4,14 @@ const { t, SITE_URL } = require('./i18n');
 // ─── ASOSIY MENYU (foydalanuvchi) ────────────────────────────────────────────
 // "Bizning sayt" va "Borib olish" eng tepada yonma-yon turadi.
 const mainMenu = (lang = 'uz') => Markup.keyboard([
-  [t(lang, 'm_website'), t(lang, 'm_pickup')],
-  [t(lang, 'm_products'), t(lang, 'm_cart')],
-  [t(lang, 'm_orders'), t(lang, 'm_profile')],
-  [t(lang, 'm_favorites'), t(lang, 'm_loyalty')],
-  [t(lang, 'm_delivery'), t(lang, 'm_contact')],
-  [t(lang, 'm_about'), t(lang, 'm_sales')],
-  [t(lang, 'm_language')],
-]).resize();
+  [t(lang, 'm_products'), t(lang, 'btnSearch')],
+  [t(lang, 'm_cart'), t(lang, 'm_orders')],
+  [t(lang, 'm_sales'), t(lang, 'm_loyalty')],
+  [t(lang, 'm_favorites'), t(lang, 'm_profile')],
+  [t(lang, 'm_delivery'), t(lang, 'm_pickup')],
+  [t(lang, 'm_website'), t(lang, 'm_contact')],
+  [t(lang, 'm_about'), t(lang, 'm_language')],
+]).resize().persistent().placeholder(t(lang, 'menuPlaceholder'));
 
 // Eski nom bilan ham chaqirilsa ishlashi uchun (alias)
 const mainMenuV2 = mainMenu;
@@ -39,7 +39,9 @@ const productActions = (productId, qty = 0, lang = 'uz') => Markup.inlineKeyboar
   [Markup.button.callback(t(lang, 'btnDetail'), `product_detail:${productId}`)],
 ]);
 
-const productActionsV2 = (productId, qty = 0, isFav = false, lang = 'uz') => Markup.inlineKeyboard([
+const productActionsV2 = (productId, qty = 0, isFav = false, lang = 'uz') => {
+  const p = require('../services/catalog').getProduct(productId);
+  return Markup.inlineKeyboard([
   [
     Markup.button.callback('➖', `cart_dec:${productId}`),
     Markup.button.callback(qty > 0 ? t(lang, 'btnInCartQty', { n: qty }) : t(lang, 'btnAdd'), `cart_add:${productId}`),
@@ -50,7 +52,13 @@ const productActionsV2 = (productId, qty = 0, isFav = false, lang = 'uz') => Mar
     Markup.button.callback(t(lang, 'btnDetail'), `product_detail:${productId}`),
     Markup.button.callback(t(lang, 'btnRate'), `review_start:${productId}`),
   ],
+  ...(qty > 0 ? [[Markup.button.callback(t(lang, 'btnCheckout'), 'order_start')]] : []),
+  [
+    Markup.button.callback(t(lang, 'back'), p?.category ? `cat:${p.category}` : 'categories'),
+    Markup.button.callback(t(lang, 'btnCart'), 'view_cart'),
+  ],
 ]);
+};
 
 const favoriteToggleBtn = (productId, isFav, lang = 'uz') => Markup.inlineKeyboard([
   [Markup.button.callback(isFav ? t(lang, 'btnFavRemove') : t(lang, 'btnFavAdd'), `fav_toggle:${productId}`)],

@@ -58,6 +58,7 @@ async function handleStart(ctx) {
   const lang = normalizeLang(user.lang || ctx.state.lang);
   ctx.state.lang = lang;
   setSession(ctx.from.id, { user });
+  await require('../utils/premium').sendSticker(ctx.telegram, ctx.chat.id, 'welcome');
 
   // Admin uchun subscription tekshirmaymiz
   if (user.isAdmin) {

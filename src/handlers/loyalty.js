@@ -107,6 +107,7 @@ async function handleDailyBonus(ctx) {
   });
   await addLog('loyalty', `Kunlik bonus: ${user.firstName} +${bonusAmount}`, { streak });
 
+  await require('../utils/premium').sendSticker(ctx.telegram, ctx.chat.id, 'bonus');
   await ctx.editMessageText(
     t(lang, 'dailyClaimed', { amount: fmtNum(bonusAmount), streak }),
     { parse_mode: 'Markdown', ...backTo(lang, 'loyalty_menu') }
@@ -395,7 +396,7 @@ async function handleAddAllFavoritesToCart(ctx) {
   let added = 0;
   for (const favId of user.favorites) {
     const p = allProducts.find(x => x.id === favId);
-    if (p && totalStock(p) > 0 && p.status !== 'inactive') { updateCart(ctx.from.id, p, 1); added++; }
+    if (p && require('../services/catalog').isAvailable(p)) { updateCart(ctx.from.id, p, 1); added++; }
   }
   await ctx.reply(t(lang, 'cartAdded'), mainMenu(lang));
 }

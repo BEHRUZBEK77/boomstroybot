@@ -54,8 +54,49 @@ if (!BOT_TOKEN) {
   console.error('❌ BOT_TOKEN o\'rnatilmagan! .env faylida BOT_TOKEN ni belgilang.');
   process.exit(1);
 }
-const bot = new Telegraf(BOT_TOKEN);
+const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: 60_000 });
 setBotInstance(bot);
+
+// ── TELEGRAM API HIMOYASI ─────────────────────────────────────────────────────
+// 1) Matnda Markdown buzilsa (masalan, mahsulot nomida "_" yoki "*") — xabar
+//    formatlashsiz qayta yuboriladi, foydalanuvchi xato ko'rmaydi.
+// 2) "message is not modified" / eskirgan callback — zararsiz, jimgina o'tkaziladi.
+{
+  const callApi = bot.telegram.callApi.bind(bot.telegram);
+  const premium = require('./utils/premium');
+  bot.telegram.callApi = async (method, payload = {}, opts) => {
+    // Rangli tugmalar + premium emoji ikonkalari (barcha klaviaturalarga markazlashgan holda)
+    if (payload && payload.reply_markup && typeof payload.reply_markup === 'object') {
+      payload = { ...payload, reply_markup: premium.decorateMarkup(payload.reply_markup) };
+    }
+    try {
+      return await callApi(method, payload, opts);
+    } catch (e) {
+      const desc = String(e.description || e.message || '');
+      // Premium ikonka rad etildi (egasida Premium yo'q) — ikonkasiz qayta yuboramiz
+      if (premium.hasIcons(payload.reply_markup) && /emoji|icon|BUTTON|DOCUMENT_INVALID|STICKER/i.test(desc)) {
+        premium.disableIcons(desc);
+        return callApi(method, { ...payload, reply_markup: premium.stripIcons(payload.reply_markup) }, opts);
+      }
+      if (/message is not modified/i.test(desc)) return true;
+      // Rasmli xabarni matnga tahrirlab bo'lmaydi / xabar o'chirilgan — yangi xabar yuboramiz
+      if (method === 'editMessageText' && payload.chat_id &&
+        /no text in the message to edit|message to edit not found|message can't be edited/i.test(desc)) {
+        const { message_id, inline_message_id, ...rest } = payload;
+        return bot.telegram.callApi('sendMessage', rest, opts);
+      }
+      if (method === 'answerCallbackQuery' && /query is too old|query ID is invalid/i.test(desc)) return true;
+      if (/can't parse entities/i.test(desc)) {
+        const plain = { ...payload };
+        delete plain.parse_mode;
+        if (Array.isArray(plain.media)) plain.media = plain.media.map(({ parse_mode, ...m }) => m);
+        console.warn(`⚠️ ${method}: Markdown xatosi, formatsiz qayta yuborildi`);
+        return callApi(method, plain, opts);
+      }
+      throw e;
+    }
+  };
+}
 
 // ── MIDDLEWARE ────────────────────────────────────────────────────────────────
 // Monitoring holati (/health da ko'rinadi)
@@ -83,6 +124,11 @@ bot.command('admin', (ctx) => {
   else ctx.reply(t(langOf(ctx), 'noAccess'));
 });
 bot.command('cancel', handleCancelOrder);
+// Premium emoji va stikerlar (faqat admin)
+const premiumAdmin = require('./handlers/premiumAdmin');
+bot.command('emoji', premiumAdmin.handleEmojiCommand);
+bot.command('sticker', premiumAdmin.handleStickerCommand);
+bot.command('search', (ctx) => require('./handlers/catalog').handleSearch(ctx));
 bot.command('cart', handleViewCart);
 bot.command('orders', handleMyOrders);
 bot.command('profile', handleProfile);
@@ -97,6 +143,7 @@ bot.command('site', handleWebsite);
 // ── FOYDALANUVCHI MENYUSI (ko'p tilli) ──────────────────────────────────────
 bot.hears(variantsOf('m_website'), handleWebsite);
 bot.hears(variantsOf('m_products'), handleCatalog);
+bot.hears(variantsOf('btnSearch'), (ctx) => require('./handlers/catalog').handleSearch(ctx));
 bot.hears(variantsOf('m_cart'), handleViewCart);
 bot.hears(variantsOf('m_orders'), handleMyOrders);
 bot.hears(variantsOf('m_profile'), handleProfile);
@@ -148,6 +195,11 @@ bot.on('location', async (ctx) => {
   ctx.reply(t(langOf(ctx), 'locationReceived'), mainMenu(langOf(ctx)));
 });
 
+// ── STICKER (admin stiker sozlash) ───────────────────────────────────────────
+bot.on('sticker', async (ctx) => {
+  await premiumAdmin.handleStickerMessage(ctx);
+});
+
 // ── PHOTO / DOCUMENT (payment) ────────────────────────────────────────────────
 bot.on(['photo', 'document'], async (ctx) => {
   const s = getSession(ctx.from.id);
@@ -173,6 +225,7 @@ bot.on('text', async (ctx) => {
     case 'writing_review': return handleReviewTextSave(ctx);
     case 'support_writing': return handleSupportTicketSave(ctx);
     case 'support_admin_reply': return handleSupportReplySave(ctx);
+    case 'premium_emoji': if (ctx.state.isAdmin) return premiumAdmin.handlePremiumEmojiText(ctx); break;
   }
 });
 
@@ -187,14 +240,8 @@ bot.on('callback_query', async (ctx) => {
     // Categories
     if (data === 'categories') return handleCatalog(ctx);
     if (data.startsWith('cat:')) return handleCategoryCallback(ctx, data.slice(4));
-    if (data.startsWith('cat_page:')) {
-      const page = parseInt(data.slice(9));
-      const { getCollection } = require('./services/firebase');
-      const cats = await getCollection('categories', 'name', 'asc');
-      await ctx.answerCbQuery();
-      const { categoryButtons } = require('./utils/keyboards');
-      return ctx.editMessageReplyMarkup(categoryButtons(cats, page, lang).reply_markup);
-    }
+    if (data.startsWith('cat_page:')) return require('./handlers/catalog').handleCatalogPage(ctx, parseInt(data.slice(9)) || 0);
+    if (data === 'search_start') return require('./handlers/catalog').handleSearch(ctx);
     if (data.startsWith('prod_page:')) {
       const parts = data.split(':');
       return handleCategoryCallback(ctx, parts[1], parseInt(parts[2]));
@@ -331,6 +378,8 @@ bot.on('callback_query', async (ctx) => {
     if (!isAdmin(ctx)) return ctx.answerCbQuery(t(lang, 'noAccess'));
 
     if (data === 'admin_dashboard') return handleAdminDashboard(ctx);
+    if (data.startsWith('stk:')) return premiumAdmin.handleStickerSlot(ctx, data.slice(4));
+    if (data.startsWith('stk_del:')) return premiumAdmin.handleStickerDelete(ctx, data.slice(8));
     if (data.startsWith('admin_orders:')) return handleAdminOrders(ctx, data.slice(13));
     if (data === 'admin_pending_orders') return handleAdminOrders(ctx, 'pending');
     if (data.startsWith('admin_order:')) return handleAdminViewOrder(ctx, data.slice(12));
@@ -472,6 +521,11 @@ async function ensureWebhook(reason = 'check') {
 }
 
 async function startBot() {
+  // Valyuta kursi va mahsulotlar katalogi (xotirada) — update'lar kelishidan oldin
+  await require('./services/currency').startCurrency();
+  await require('./utils/premium').loadPremium();
+  await Promise.race([require('./services/catalog').startCatalog(), sleep(20000)]);
+
   // Token to'g'riligini tekshiramiz — noto'g'ri bo'lsa logda aniq ko'rinadi
   for (let attempt = 1; ; attempt++) {
     try {
@@ -512,7 +566,21 @@ async function startBot() {
 
   startCrons();
   startWatchers(bot);
-  require('./services/diagnose').diagnoseData();
+  setupCommands().catch(e => console.warn('setMyCommands:', e.message));
+}
+
+// "/" menyusidagi buyruqlar — har bir til uchun
+async function setupCommands() {
+  const L = {
+    uz: ['Botni ishga tushirish', 'Mahsulot qidirish', 'Savat', 'Buyurtmalarim', 'Profil', 'Bonuslar', 'Tilni o\'zgartirish', 'Yordam'],
+    ru: ['Запустить бота', 'Поиск товаров', 'Корзина', 'Мои заказы', 'Профиль', 'Бонусы', 'Сменить язык', 'Помощь'],
+    en: ['Start the bot', 'Search products', 'Cart', 'My orders', 'Profile', 'Bonuses', 'Change language', 'Help'],
+  };
+  const names = ['start', 'search', 'cart', 'orders', 'profile', 'bonus', 'lang', 'help'];
+  const build = (d) => names.map((command, i) => ({ command, description: d[i] }));
+  await bot.telegram.setMyCommands(build(L.uz));
+  await bot.telegram.setMyCommands(build(L.ru), { language_code: 'ru' });
+  await bot.telegram.setMyCommands(build(L.en), { language_code: 'en' });
 }
 
 const server = app.listen(PORT, '0.0.0.0', () => {

@@ -171,3 +171,29 @@ Barcha matnlar `src/utils/i18n.js` dagi `T` obyektida `key: { uz, uz_cyrl, ru, e
 ko'rinishida saqlanadi. Yangi matn qo'shish uchun shu yerga kalit qo'shing va
 handlerda `t(lang, 'kalit', { o'zgaruvchilar })` deb chaqiring. Menyu tugmalari
 uchun `variantsOf('kalit')` barcha tillardagi variantlarni `bot.hears` ga beradi.
+
+---
+
+## ✨ Premium emoji, rangli tugmalar va stikerlar
+
+- **Rangli tugmalar** avtomatik: tasdiqlash — yashil, bekor qilish — qizil, asosiy harakatlar — ko'k.
+- **Premium emoji** (bot egasida Telegram Premium bo'lishi kerak):
+  1. Botga `/emoji` yozing.
+  2. Har qatorda oddiy emoji va uning o'rniga chiqadigan premium emojini yuboring, masalan `🛒 <premium savat>`.
+  3. Shu emoji bilan boshlanadigan barcha tugmalar avtomatik premium ikonka oladi. Hammasini o'chirish: `/emoji reset`.
+- **Stikerlar**: `/sticker` → holatni tanlang (salomlashish, buyurtma qabul qilindi, yetkazildi, bonus) → stikerni yuboring.
+
+## 💱 Narxlar va valyuta
+
+Bazada `currency: "USD"` bo'lgan mahsulotlar Markaziy bank (cbu.uz) kursi bo'yicha so'mga o'giriladi
+(har 6 soatda yangilanadi, 100 so'mga yaxlitlanadi). Sozlash uchun Railway Variables:
+
+| O'zgaruvchi | Ma'nosi |
+|---|---|
+| `USD_RATE` | Kursni qo'lda belgilash (masalan `12800`) — CBU dan ustun |
+| `USD_RATE_MARKUP` | CBU kursiga foiz ustama (masalan `1.5`) |
+
+## 📦 Zaxira
+
+`stock` bo'sh (`{}`) bo'lgan mahsulotlar "Sotuvda" deb ko'rsatiladi (zaxira yuritilmaydi).
+Ombor bo'yicha miqdor kiritilsa — bot uni hisobga oladi va tugaganda mahsulotni yashiradi.

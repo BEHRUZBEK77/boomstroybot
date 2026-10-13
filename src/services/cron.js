@@ -16,7 +16,7 @@ function startCrons() {
     if (!botInstance) return;
     try {
       const products = await getCollection('products');
-      const low = products.filter(p => getStockStatus(p).val !== 'ok');
+      const low = products.filter(p => (getStockStatus(p).val !== 'ok'));
       if (!low.length) return;
 
       const text =

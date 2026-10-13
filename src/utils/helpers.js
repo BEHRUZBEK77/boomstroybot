@@ -35,18 +35,34 @@ function timeAgo(ts) {
   }
 }
 
+// Zaxira haqiqatan yuritiladimi? Saytdan qo'shilgan mahsulotlarda `stock: {}` (bo'sh)
+// bo'ladi — bu "miqdor kiritilmagan" degani, "tugagan" emas. Bunday mahsulotlar
+// buyurtma asosida sotuvda deb hisoblanadi.
+function isStockTracked(p) {
+  if (!p) return false;
+  if (typeof p.stockTracked === 'boolean') return p.stockTracked;
+  if (p.stock && typeof p.stock === 'object' && Object.keys(p.stock).length > 0) return true;
+  return typeof p.quantity === 'number';
+}
+
 // Yangi mahsulotlarda miqdor `stock` obyektida (ombor bo'yicha) saqlanadi.
 // Eski mahsulotlarda `quantity` maydoni bo'lishi mumkin — orqaga moslik uchun.
 function totalStock(p) {
-  if (p.stock && typeof p.stock === 'object') {
+  if (p.stock && typeof p.stock === 'object' && Object.keys(p.stock).length > 0) {
     return Object.values(p.stock).reduce((a, v) => a + (parseInt(v) || 0), 0);
   }
   return p.quantity || 0;
 }
 
+// Savatga qo'shish mumkin bo'lgan maksimal miqdor (zaxira yuritilmasa — cheklovsiz)
+function maxOrderQty(p) {
+  return isStockTracked(p) ? totalStock(p) : 9999;
+}
+
 // Berilgan miqdorni ombor(lar) bo'yicha ayiradi (birinchi yetarli ombordan boshlab)
 function deductStock(stock, qty) {
   const s = { ...(stock || {}) };
+  if (!Object.keys(s).length) return s; // zaxira yuritilmaydi
   let remaining = qty;
   for (const k of Object.keys(s)) {
     if (remaining <= 0) break;
@@ -61,12 +77,14 @@ function deductStock(stock, qty) {
 // Miqdorni qaytarish (bekor qilingan buyurtma uchun) — birinchi mavjud omborga qo'shadi
 function addStock(stock, qty) {
   const s = { ...(stock || {}) };
+  if (!Object.keys(s).length) return s; // zaxira yuritilmaydi — hech narsa qo'shmaymiz
   const key = Object.keys(s)[0] || '_default';
   s[key] = (parseInt(s[key]) || 0) + qty;
   return s;
 }
 
 function getStockStatus(p) {
+  if (!isStockTracked(p)) return { emoji: '🟢', label: 'Mavjud', val: 'ok', untracked: true };
   const qty = totalStock(p);
   const min = p.minQuantity || 5;
   if (qty <= 0) return { emoji: '🔴', label: 'Tugagan', val: 'out' };
@@ -88,7 +106,14 @@ function orderStatusLabel(s, lang = 'uz') {
 
 function escapeMarkdown(text) {
   if (!text) return '';
-  return String(text).replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&');
+  // Telegram "Markdown" (v1) rejimida faqat shu belgilar maxsus: _ * ` [
+  return String(text).replace(/([_*`\[])/g, '\\$1');
+}
+
+// Qalin matn (Markdown v1): maxsus belgilar bo'lsa qalin qilmay, xavfsiz qochiradi
+function mdBold(text) {
+  const s = String(text ?? '');
+  return /[_*`\[]/.test(s) ? escapeMarkdown(s) : `*${s}*`;
 }
 
 function chunk(arr, size) {
@@ -190,8 +215,8 @@ function truncate(text, len = 80) {
 
 module.exports = {
   fmtNum, fmtDate, fmtDateShort, timeAgo,
-  getStockStatus, totalStock, deductStock, addStock, paymentLabel, orderStatusLabel,
-  escapeMarkdown, chunk, generateOrderNumber, parseCoords,
+  getStockStatus, totalStock, isStockTracked, maxOrderQty, deductStock, addStock, paymentLabel, orderStatusLabel,
+  escapeMarkdown, mdBold, chunk, generateOrderNumber, parseCoords,
   LOYALTY_EARN_RATE, LOYALTY_POINT_VALUE, REFERRAL_BONUS_POINTS, REFERRAL_WELCOME_POINTS,
   calcEarnedPoints, getLoyaltyTier, generateReferralCode, generatePromoCode,
   isPromoValid, calcPromoDiscount, maskCardNumber, starsBar, pluralUnit, truncate,

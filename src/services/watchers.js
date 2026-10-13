@@ -126,8 +126,9 @@ async function onOrderChange(bot, db, order, isInitial) {
     }
   }
 
-  // Yetkazib berilganda baholash so'rovi
+  // Yetkazib berilganda stiker + baholash so'rovi
   if (status === 'delivered') {
+    await require('../utils/premium').sendSticker(bot.telegram, order.telegramId, 'delivered');
     try {
       const { handleOrderRatingRequest } = require('../handlers/loyalty');
       await handleOrderRatingRequest(bot, order.telegramId, order.id, order.orderNumber);

@@ -189,6 +189,14 @@ const T = {
   price: { uz: 'Narx', uz_cyrl: 'Нарх', ru: 'Цена', en: 'Price' },
   brand: { uz: 'Brend', uz_cyrl: 'Бренд', ru: 'Бренд', en: 'Brand' },
   available: { uz: 'Mavjud', uz_cyrl: 'Мавжуд', ru: 'В наличии', en: 'In stock' },
+  menuPlaceholder: { uz: "Bo'limni tanlang…", uz_cyrl: 'Бўлимни танланг…', ru: 'Выберите раздел…', en: 'Choose a section…' },
+  cartItemsCount: { uz: '{n} xil mahsulot · {q} dona', uz_cyrl: '{n} хил маҳсулот · {q} дона', ru: '{n} позиций · {q} шт', en: '{n} items · {q} pcs' },
+  btnSearch: { uz: '🔍 Qidirish', uz_cyrl: '🔍 Қидириш', ru: '🔍 Поиск', en: '🔍 Search' },
+  catalogHeader: { uz: '🏗 *BoomStroy katalogi*', uz_cyrl: '🏗 *BoomStroy каталоги*', ru: '🏗 *Каталог BoomStroy*', en: '🏗 *BoomStroy catalog*' },
+  catalogStats: { uz: "📦 {n} ta mahsulot · {c} ta bo'lim", uz_cyrl: '📦 {n} та маҳсулот · {c} та бўлим', ru: '📦 {n} товаров · {c} разделов', en: '📦 {n} products · {c} sections' },
+  catalogHint: { uz: "Bo'limni tanlang yoki 🔍 qidiruvdan foydalaning 👇", uz_cyrl: 'Бўлимни танланг ёки 🔍 қидирувдан фойдаланинг 👇', ru: 'Выберите раздел или воспользуйтесь 🔍 поиском 👇', en: 'Pick a section or use 🔍 search 👇' },
+  pageOf: { uz: '{p}/{n}-sahifa', uz_cyrl: '{p}/{n}-саҳифа', ru: 'стр. {p}/{n}', en: 'page {p}/{n}' },
+  inStockOrder: { uz: 'Sotuvda ✅', uz_cyrl: 'Сотувда ✅', ru: 'В продаже ✅', en: 'Available ✅' },
   reviewsWord: { uz: 'sharh', uz_cyrl: 'шарҳ', ru: 'отзыв(ов)', en: 'reviews' },
   inYourCart: { uz: 'Savatingizda', uz_cyrl: 'Саватингизда', ru: 'В корзине', en: 'In your cart' },
   soldOut: { uz: "❌ Sotib bo'lingan", uz_cyrl: '❌ Сотиб бўлинган', ru: '❌ Распродано', en: '❌ Sold out' },
@@ -652,7 +660,15 @@ function t(lang, key, vars = {}) {
 function variants(key) {
   const entry = T[key];
   if (!entry) return [];
-  return [...new Set(LANGS.map(l => entry[l]).filter(Boolean))];
+  // Premium ikonka qo'yilgan tugmalarda matn emoji'siz yuboriladi — ikkalasini ham qabul qilamiz
+  const { stripLeadingEmoji } = require('./premium');
+  const out = new Set();
+  LANGS.map(l => entry[l]).filter(Boolean).forEach(v => {
+    out.add(v);
+    const bare = stripLeadingEmoji(v).trim();
+    if (bare && bare !== v) out.add(bare);
+  });
+  return [...out];
 }
 
 // Bir nechta kalitlarning barcha variantlari

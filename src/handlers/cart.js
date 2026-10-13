@@ -1,52 +1,65 @@
 const { getCollection } = require('../services/firebase');
 const { updateCart, getCart, clearCart, getCartTotal } = require('../services/session');
-const { fmtNum, totalStock } = require('../utils/helpers');
+const { fmtNum, totalStock, maxOrderQty } = require('../utils/helpers');
 const { cartActions } = require('../utils/keyboards');
 const { t, langOf } = require('../utils/i18n');
 const { Markup } = require('telegraf');
 
+// Callback bo'lsa xabarni tahrirlaydi; rasmli xabar bo'lsa o'chirib, yangisini yuboradi
+async function show(ctx, text, extra) {
+  const msg = ctx.callbackQuery?.message;
+  if (msg) {
+    if (msg.photo || msg.caption !== undefined) {
+      await ctx.deleteMessage().catch(() => { });
+      return ctx.reply(text, extra);
+    }
+    try { return await ctx.editMessageText(text, extra); } catch { }
+  }
+  return ctx.reply(text, extra);
+}
+
 async function handleViewCart(ctx) {
   const lang = langOf(ctx);
-  if (ctx.callbackQuery) await ctx.answerCbQuery();
+  if (ctx.callbackQuery) await ctx.answerCbQuery().catch(() => { });
   const cart = getCart(ctx.from.id);
+  const som = t(lang, 'som');
 
   if (!cart.length) {
-    const msg = t(lang, 'cartEmpty');
-    const kb = Markup.inlineKeyboard([[Markup.button.callback(t(lang, 'btnProducts'), 'categories')]]);
-    if (ctx.callbackQuery) return ctx.editMessageText(msg, kb);
-    return ctx.reply(msg, kb);
+    return show(ctx, t(lang, 'cartEmpty'), Markup.inlineKeyboard([
+      [Markup.button.callback(t(lang, 'btnProducts'), 'categories')],
+      [Markup.button.callback(t(lang, 'btnSearch'), 'search_start')],
+    ]));
   }
 
-  let text = `${t(lang, 'cartTitle')}\n━━━━━━━━━━━━━━━\n`;
-  for (const item of cart) {
-    text += `• ${item.name}\n  ${item.qty} × ${fmtNum(item.price)} = *${fmtNum(item.qty * item.price)} ${t(lang, 'som')}*\n`;
-  }
+  const { escapeMarkdown } = require('../utils/helpers');
+  let text = `${t(lang, 'cartTitle')}\n━━━━━━━━━━━━━━━━\n`;
+  cart.forEach((item, i) => {
+    text += `*${i + 1}.* ${escapeMarkdown(item.name)}\n` +
+      `      ${item.qty} × ${fmtNum(item.price)} = *${fmtNum(item.qty * item.price)} ${som}*\n`;
+  });
   const total = getCartTotal(ctx.from.id);
-  text += `━━━━━━━━━━━━━━━\n💰 *${t(lang, 'cartTotal')}: ${fmtNum(total)} ${t(lang, 'som')}*\n${t(lang, 'cartDeliverySeparate')}`;
+  const count = cart.reduce((a, i) => a + i.qty, 0);
+  text += `━━━━━━━━━━━━━━━━\n🧾 ${t(lang, 'cartItemsCount', { n: cart.length, q: count })}\n` +
+    `💰 *${t(lang, 'cartTotal')}: ${fmtNum(total)} ${som}*\n${t(lang, 'cartDeliverySeparate')}`;
 
-  if (ctx.callbackQuery) {
-    try {
-      return ctx.editMessageText(text, { parse_mode: 'Markdown', ...cartActions(lang) });
-    } catch { }
-  }
-  await ctx.reply(text, { parse_mode: 'Markdown', ...cartActions(lang) });
+  return show(ctx, text, { parse_mode: 'Markdown', ...cartActions(lang) });
 }
 
 async function handleAddToCart(ctx, productId) {
   const lang = langOf(ctx);
-  await ctx.answerCbQuery(t(lang, 'cartAdded'));
   const products = await getCollection('products');
   const p = products.find(x => x.id === productId);
-  if (!p) return ctx.answerCbQuery(t(lang, 'productNotFound'));
+  if (!p) return ctx.answerCbQuery(t(lang, 'productNotFound'), { show_alert: true });
 
   const cart = getCart(ctx.from.id);
   const currentQty = cart.find(i => i.productId === productId)?.qty || 0;
 
-  if (currentQty >= totalStock(p)) {
+  if (currentQty >= maxOrderQty(p)) {
     return ctx.answerCbQuery(t(lang, 'cartNotEnough'), { show_alert: true });
   }
 
   updateCart(ctx.from.id, p, 1);
+  await ctx.answerCbQuery(t(lang, 'cartAdded')).catch(() => { });
   const newCart = getCart(ctx.from.id);
   const item = newCart.find(i => i.productId === productId);
 

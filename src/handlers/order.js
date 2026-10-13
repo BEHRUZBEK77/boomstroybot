@@ -395,6 +395,7 @@ async function handleOrderConfirm(ctx) {
     grand: fmtNum(grandTotal), recv, earned: fmtNum(earnedPoints), payNote, som,
   });
 
+  await require('../utils/premium').sendSticker(ctx.telegram, ctx.chat.id, 'order');
   await ctx.editMessageText(userText, {
     parse_mode: 'Markdown',
     ...Markup.inlineKeyboard([[Markup.button.callback(t(lang, 'btnMyOrders'), 'my_orders')]]),
