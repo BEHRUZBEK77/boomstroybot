@@ -104,7 +104,8 @@ async function autoLoadEmoji(telegram) {
   }
   for (const [from, to] of Object.entries(ALIASES)) if (!auto[from] && auto[to]) auto[from] = auto[to];
   state.auto = auto;
-  console.log(`✨ Premium emoji: ${Object.keys(auto).length} ta avtomatik (${Object.keys(auto).slice(0, 40).join('')}), qo'lda: ${Object.keys(state.map).length}`);
+  console.log(`✨ Premium emoji: ${Object.keys(auto).length} ta avtomatik, qo'lda: ${Object.keys(state.map).length}`);
+  console.log(`✨ Premium ro'yxat: ${Object.keys(auto).join(' ')}`);
 }
 
 // ── Tugma ranglari (callback_data bo'yicha) ──────────────────────────────────
