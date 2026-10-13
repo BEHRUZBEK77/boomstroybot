@@ -1,7 +1,6 @@
 const { getSession, setSession } = require('../services/session');
 const { queryDocs, addDoc, updateDoc } = require('../services/firebase');
 const { mainMenu, sharePhoneButton, adminMainMenu } = require('../utils/keyboards');
-const { checkSubscription, sendSubscribePrompt, CHANNEL_LINK } = require('../middlewares/subscription');
 const { t, langOf, normalizeLang, SITE_URL } = require('../utils/i18n');
 const { Markup } = require('telegraf');
 
@@ -60,16 +59,9 @@ async function handleStart(ctx) {
   setSession(ctx.from.id, { user });
   await require('../utils/premium').sendSticker(ctx.telegram, ctx.chat.id, 'welcome');
 
-  // Admin uchun subscription tekshirmaymiz
+  // Admin uchun alohida menyu
   if (user.isAdmin) {
     await ctx.reply(t(lang, 'adminWelcome', { name: user.firstName }), { parse_mode: 'Markdown', ...adminMainMenu(lang) });
-    return;
-  }
-
-  // Kanalga obuna tekshirish
-  const subscribed = await checkSubscription(ctx);
-  if (!subscribed) {
-    await sendSubscribePrompt(ctx);
     return;
   }
 
@@ -85,27 +77,16 @@ async function handleStart(ctx) {
   await showWelcome(ctx, user);
 }
 
-// "A'zo bo'ldim" tugmasi bosilganda
+// Eski xabarlardagi "A'zo bo'ldim" tugmasi — kanal tekshiruvi olib tashlangan, shunchaki davom etadi
 async function handleCheckSub(ctx) {
   const lang = langOf(ctx);
-  await ctx.answerCbQuery(t(lang, 'subChecking')).catch(() => {});
-
-  const subscribed = await checkSubscription(ctx);
-  if (!subscribed) {
-    await ctx.reply(t(lang, 'subNotYet'), {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.url(t(lang, 'subBtnGoto'), CHANNEL_LINK)],
-        [Markup.button.callback(t(lang, 'subBtnRecheck'), 'check_sub')],
-      ]),
-    });
-    return;
-  }
+  await ctx.answerCbQuery().catch(() => {});
+  await ctx.deleteMessage().catch(() => {});
 
   const user = await getOrCreateUser(ctx);
 
   if (!user.phone) {
-    await ctx.reply(t(lang, 'subSuccess'), { parse_mode: 'Markdown', ...sharePhoneButton(lang) });
+    await ctx.reply(t(lang, 'askPhone', { name: user.firstName || t(lang, 'dearCustomer') }), { parse_mode: 'Markdown', ...sharePhoneButton(lang) });
     setSession(ctx.from.id, { step: 'waiting_phone', user });
     return;
   }
