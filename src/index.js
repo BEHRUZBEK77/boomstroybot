@@ -512,6 +512,7 @@ async function startBot() {
 
   startCrons();
   startWatchers(bot);
+  require('./services/diagnose').diagnoseData();
 }
 
 const server = app.listen(PORT, '0.0.0.0', () => {
