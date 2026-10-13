@@ -58,6 +58,21 @@ const bot = new Telegraf(BOT_TOKEN);
 setBotInstance(bot);
 
 // ── MIDDLEWARE ────────────────────────────────────────────────────────────────
+// Monitoring holati (/health da ko'rinadi)
+const status = {
+  mode: null,
+  botUsername: null,
+  lastUpdateAt: null,
+  updatesHandled: 0,
+  webhook: null,         // getWebhookInfo dan oxirgi natija
+  lastWebhookCheck: null,
+  webhookRepairs: 0,
+};
+bot.use((ctx, next) => {
+  status.lastUpdateAt = new Date();
+  status.updatesHandled++;
+  return next();
+});
 bot.use(authMiddleware);
 
 // ── COMMANDS ──────────────────────────────────────────────────────────────────
@@ -362,50 +377,160 @@ bot.catch((err, ctx) => {
   } catch { }
 });
 
+// ── GLOBAL XATOLARNI USHLASH ──────────────────────────────────────────────────
+// Bitta kutilmagan xato butun jarayonni jimgina "o'ldirmasligi" uchun.
+process.on('unhandledRejection', (reason) => {
+  console.error('⚠️ unhandledRejection:', reason?.stack || reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('💥 uncaughtException:', err?.stack || err);
+});
+
 // ── EXPRESS SERVER (Railway + Webhook) ────────────────────────────────────────
+const crypto = require('crypto');
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 
-const PORT = process.env.PORT || 3000;
-const WEBHOOK_URL = process.env.WEBHOOK_URL;
+const PORT = Number(process.env.PORT) || 3000;
 
-if (WEBHOOK_URL && process.env.NODE_ENV === 'production') {
-  app.use(bot.webhookCallback('/webhook'));
-  app.get('/', (req, res) => res.send('🏗️ BoomStroy Bot ishlayapti!'));
-  app.get('/health', (req, res) => res.json({ status: 'ok', bot: 'BoomStroy', time: new Date() }));
+// Webhook manzili: WEBHOOK_URL bo'lmasa Railway domenidan avtomatik olinadi
+const BASE_URL = (
+  process.env.WEBHOOK_URL ||
+  (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '')
+).replace(/\/+$/, '');
+const USE_WEBHOOK = Boolean(BASE_URL) && process.env.USE_POLLING !== 'true';
 
-  app.get('/admin', (req, res) => {
-    res.send(`<!DOCTYPE html><html lang="uz"><head><meta charset="UTF-8"><title>BoomStroy Bot</title>
-      <style>body{font-family:sans-serif;max-width:600px;margin:40px auto;padding:20px;background:#f1f5f9}
-      .card{background:#fff;border-radius:12px;padding:24px;box-shadow:0 2px 8px rgba(0,0,0,.1);margin-bottom:16px}
-      h1{color:#1a56db}a.btn{background:#1a56db;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;display:inline-block;margin-top:8px}</style>
-      </head><body><div class="card"><h1>🏗️ BoomStroy Bot</h1><p>✅ Bot faol va ishlayapti!</p>
-      <a class="btn" href="${SITE_URL}">🌐 Saytga o'tish</a></div></body></html>`);
-  });
+const WEBHOOK_PATH = '/webhook';
+const WEBHOOK_FULL_URL = `${BASE_URL}${WEBHOOK_PATH}`;
+// Faqat Telegram yuborgan so'rovlarni qabul qilish uchun maxfiy kalit (BOT_TOKEN dan hosil qilinadi)
+const WEBHOOK_SECRET = crypto.createHash('sha256').update(BOT_TOKEN).digest('hex').slice(0, 48);
+const ALLOWED_UPDATES = ['message', 'edited_message', 'callback_query', 'my_chat_member'];
 
-  app.listen(PORT, async () => {
-    console.log(`🚀 Server port ${PORT} da ishlamoqda`);
-    try {
-      await bot.telegram.setWebhook(`${WEBHOOK_URL}/webhook`);
-      console.log(`✅ Webhook o'rnatildi: ${WEBHOOK_URL}/webhook`);
-    } catch (e) {
-      console.error('Webhook xatosi:', e.message);
+const startedAt = new Date();
+status.mode = USE_WEBHOOK ? 'webhook' : 'polling';
+
+app.get('/', (req, res) => res.send('🏗️ BoomStroy Bot ishlayapti!'));
+app.get('/health', (req, res) => res.json({
+  status: 'ok',
+  bot: 'BoomStroy',
+  username: status.botUsername,
+  mode: status.mode,
+  uptimeSec: Math.round((Date.now() - startedAt.getTime()) / 1000),
+  lastUpdateAt: status.lastUpdateAt,
+  updatesHandled: status.updatesHandled,
+  webhook: status.webhook && {
+    ok: status.webhook.url === WEBHOOK_FULL_URL,
+    pending: status.webhook.pending_update_count,
+    lastError: status.webhook.last_error_message || null,
+    lastErrorAt: status.webhook.last_error_date ? new Date(status.webhook.last_error_date * 1000) : null,
+  },
+  lastWebhookCheck: status.lastWebhookCheck,
+  webhookRepairs: status.webhookRepairs,
+  time: new Date(),
+}));
+
+app.get('/admin', (req, res) => {
+  res.send(`<!DOCTYPE html><html lang="uz"><head><meta charset="UTF-8"><title>BoomStroy Bot</title>
+    <style>body{font-family:sans-serif;max-width:600px;margin:40px auto;padding:20px;background:#f1f5f9}
+    .card{background:#fff;border-radius:12px;padding:24px;box-shadow:0 2px 8px rgba(0,0,0,.1);margin-bottom:16px}
+    h1{color:#1a56db}a.btn{background:#1a56db;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;display:inline-block;margin-top:8px}</style>
+    </head><body><div class="card"><h1>🏗️ BoomStroy Bot</h1><p>✅ Bot faol va ishlayapti!</p>
+    <a class="btn" href="${SITE_URL}">🌐 Saytga o'tish</a></div></body></html>`);
+});
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// Webhook to'g'ri o'rnatilganini tekshiradi; yo'qolgan yoki o'zgargan bo'lsa qayta o'rnatadi.
+// Bu botning "o'chib qolishi"ga qarshi asosiy himoya: webhook biror sababdan
+// (lokal ishga tushirish, deleteWebhook, Telegram xatosi) yo'qolsa ham 5 daqiqada tiklanadi.
+async function ensureWebhook(reason = 'check') {
+  try {
+    const info = await bot.telegram.getWebhookInfo();
+    status.webhook = info;
+    status.lastWebhookCheck = new Date();
+
+    if (info.url !== WEBHOOK_FULL_URL) {
+      console.warn(`🔧 Webhook noto'g'ri (${reason}): hozirgi="${info.url || 'yo\'q'}" → o'rnatilmoqda`);
+      await bot.telegram.setWebhook(WEBHOOK_FULL_URL, {
+        secret_token: WEBHOOK_SECRET,
+        allowed_updates: ALLOWED_UPDATES,
+        max_connections: 40,
+        drop_pending_updates: false,
+      });
+      status.webhookRepairs++;
+      status.webhook = await bot.telegram.getWebhookInfo();
+      console.log(`✅ Webhook o'rnatildi: ${WEBHOOK_FULL_URL}`);
+    } else if (info.last_error_message && info.last_error_date &&
+      Date.now() / 1000 - info.last_error_date < 600) {
+      console.warn(`⚠️ Telegram webhook xatosi: ${info.last_error_message} (kutilmoqda: ${info.pending_update_count})`);
     }
-    startCrons();
-    startWatchers(bot);
-  });
-} else {
-  app.get('/health', (req, res) => res.json({ status: 'ok' }));
-  app.listen(PORT, () => console.log(`Server port ${PORT} da`));
-
-  bot.launch({ allowedUpdates: ['message', 'callback_query', 'my_chat_member'] }).then(() => {
-    console.log('✅ BoomStroy Bot polling rejimida ishlamoqda...');
-    startCrons();
-    startWatchers(bot);
-  });
-
-  process.once('SIGINT', () => bot.stop('SIGINT'));
-  process.once('SIGTERM', () => bot.stop('SIGTERM'));
+    return true;
+  } catch (e) {
+    console.error(`❌ Webhook tekshirish xatosi (${reason}):`, e.message);
+    return false;
+  }
 }
+
+async function startBot() {
+  // Token to'g'riligini tekshiramiz — noto'g'ri bo'lsa logda aniq ko'rinadi
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const me = await bot.telegram.getMe();
+      status.botUsername = me.username;
+      bot.botInfo = me;
+      console.log(`🤖 Bot: @${me.username} (id ${me.id})`);
+      break;
+    } catch (e) {
+      const code = e.response?.error_code;
+      console.error(`❌ getMe xatosi (urinish ${attempt}):`, e.message);
+      if (code === 401 || code === 404) {
+        console.error('❌ BOT_TOKEN yaroqsiz! BotFather dan yangi token olib, Railway Variables da BOT_TOKEN ni yangilang.');
+        process.exit(1);
+      }
+      await sleep(Math.min(30000, 2000 * attempt));
+    }
+  }
+
+  if (USE_WEBHOOK) {
+    app.use(bot.webhookCallback(WEBHOOK_PATH, { secretToken: WEBHOOK_SECRET }));
+
+    // Webhook o'rnatilmaguncha qayta urinamiz
+    for (let attempt = 1; !(await ensureWebhook('startup')); attempt++) {
+      await sleep(Math.min(30000, 2000 * attempt));
+    }
+    // Har 5 daqiqada webhookni tekshirib turamiz
+    setInterval(() => ensureWebhook('periodic'), 5 * 60 * 1000).unref();
+    console.log(`✅ BoomStroy Bot webhook rejimida ishlamoqda (${WEBHOOK_FULL_URL})`);
+  } else {
+    await bot.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => { });
+    bot.launch({ allowedUpdates: ALLOWED_UPDATES }).catch((e) => {
+      console.error('❌ Polling to\'xtadi:', e.message);
+      process.exit(1); // Railway qayta ishga tushiradi
+    });
+    console.log('✅ BoomStroy Bot polling rejimida ishlamoqda...');
+  }
+
+  startCrons();
+  startWatchers(bot);
+}
+
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server port ${PORT} da ishlamoqda (${status.mode})`);
+  startBot().catch((e) => {
+    console.error('❌ Bot ishga tushmadi:', e?.stack || e);
+    process.exit(1);
+  });
+});
+
+// Railway yangi deploy qilganda toza to'xtash.
+// MUHIM: webhookni O'CHIRMAYMIZ — aks holda yangi versiya ishga tushguncha bot jim qoladi.
+function shutdown(signal) {
+  console.log(`🛑 ${signal} olindi, to'xtatilmoqda...`);
+  if (!USE_WEBHOOK) { try { bot.stop(signal); } catch { } }
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 8000).unref();
+}
+process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));
 
 module.exports = { bot };

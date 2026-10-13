@@ -42,7 +42,11 @@ async function authMiddleware(ctx, next) {
 
   // Foydalanuvchini yuklash: til + bloklash holati
   try {
-    const users = await queryDocs('telegramUsers', 'telegramId', '==', userId);
+    // Firestore sekinlashsa butun bot qotib qolmasligi uchun 4 soniya chegarasi
+    const users = await Promise.race([
+      queryDocs('telegramUsers', 'telegramId', '==', userId),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('firestore timeout')), 4000)),
+    ]);
     const user = users[0];
     if (user) {
       ctx.state.user = user;
@@ -55,7 +59,9 @@ async function authMiddleware(ctx, next) {
         return ctx.reply(t(lang, 'blocked', { support: SUPPORT_USERNAME }));
       }
     }
-  } catch { }
+  } catch (e) {
+    console.error('auth: foydalanuvchini yuklab bo\'lmadi:', e.message);
+  }
 
   return next();
 }

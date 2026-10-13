@@ -27,20 +27,43 @@ function startWatchers(bot) {
 }
 
 // ─── 1. BUYURTMA HOLATI KUZATUVCHISI ─────────────────────────────────────────
+// onSnapshot xato bersa (tarmoq, kvota, token) Firestore tinglovchini BUTUNLAY to'xtatadi.
+// Shuning uchun xatodan keyin backoff bilan qayta ulanamiz.
+function resilientSnapshot(name, query, onChange) {
+  let attempt = 0;
+  let initial = true; // faqat ENG BIRINCHI ulanishda "jim belgilash" ishlaydi
+  const subscribe = () => {
+    let firstSnap = true;
+    const unsub = query.onSnapshot(
+      (snap) => {
+        attempt = 0;
+        const isInitial = initial && firstSnap;
+        // Qayta ulanishda birinchi snapshot butun kolleksiyani "added" deb beradi —
+        // bu yangi o'zgarish emas, lekin lastNotifiedStatus/sentToTelegram tekshiruvi
+        // takroriy xabarlarni oldini oladi.
+        firstSnap = false;
+        initial = false;
+        snap.docChanges().forEach((ch) => {
+          if (ch.type === 'removed') return;
+          onChange({ id: ch.doc.id, ...ch.doc.data() }, isInitial);
+        });
+      },
+      (err) => {
+        attempt++;
+        const delay = Math.min(5 * 60 * 1000, 5000 * 2 ** Math.min(attempt, 6));
+        console.error(`${name} onSnapshot xato: ${err.message} — ${Math.round(delay / 1000)}s dan keyin qayta ulanadi`);
+        try { unsub(); } catch { }
+        setTimeout(subscribe, delay);
+      }
+    );
+  };
+  subscribe();
+}
+
 function watchOrders(bot, db) {
-  let initial = true;
-  db.collection('orders').onSnapshot(
-    (snap) => {
-      const isInitial = initial;
-      initial = false;
-      snap.docChanges().forEach((ch) => {
-        if (ch.type === 'removed') return;
-        const order = { id: ch.doc.id, ...ch.doc.data() };
-        onOrderChange(bot, db, order, isInitial).catch(e => console.error('order watch:', e.message));
-      });
-    },
-    (err) => console.error('orders onSnapshot xato:', err.message)
-  );
+  resilientSnapshot('orders', db.collection('orders'), (order, isInitial) => {
+    onOrderChange(bot, db, order, isInitial).catch(e => console.error('order watch:', e.message));
+  });
 }
 
 async function markOrderNotified(db, id, status) {
@@ -116,19 +139,9 @@ async function onOrderChange(bot, db, order, isInitial) {
 
 // ─── 2. E'LON / AKSIYA KUZATUVCHISI ──────────────────────────────────────────
 function watchAnnouncements(bot, db) {
-  let initial = true;
-  db.collection('announcements').onSnapshot(
-    (snap) => {
-      const isInitial = initial;
-      initial = false;
-      snap.docChanges().forEach((ch) => {
-        if (ch.type === 'removed') return;
-        const ann = { id: ch.doc.id, ...ch.doc.data() };
-        onAnnouncement(bot, db, ann, isInitial).catch(e => console.error('announcement watch:', e.message));
-      });
-    },
-    (err) => console.error('announcements onSnapshot xato:', err.message)
-  );
+  resilientSnapshot('announcements', db.collection('announcements'), (ann, isInitial) => {
+    onAnnouncement(bot, db, ann, isInitial).catch(e => console.error('announcement watch:', e.message));
+  });
 }
 
 const sendingAnn = new Set();

@@ -61,6 +61,12 @@ npm start        # node
 # Production (webhook): .env da NODE_ENV=production va WEBHOOK_URL ni bering
 ```
 
+> ⚠️ **Muhim:** lokal polling rejimi Telegram webhookni o'chiradi. Production bot ishlayotgan
+> TOKEN bilan lokal ishga tushirmang — test uchun alohida bot (BotFather) oching.
+> Production bot har 5 daqiqada webhookni tekshiradi va yo'qolgan bo'lsa avtomatik qayta o'rnatadi.
+>
+> Holatni tekshirish: `https://<railway-domen>/health` — `webhook.ok`, `lastUpdateAt`, `lastError` ko'rinadi.
+
 Node.js **18+** talab qilinadi.
 
 ---
