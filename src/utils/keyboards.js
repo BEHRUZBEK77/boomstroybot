@@ -48,7 +48,7 @@ const productActionsV2 = (productId, qty = 0, isFav = false, lang = 'uz') => {
     Markup.button.callback('➕', `cart_inc:${productId}`),
   ],
   [
-    Markup.button.callback(isFav ? '💔' : '❤️', `fav_toggle:${productId}`),
+    { ...Markup.button.callback(isFav ? t(lang, 'favSaved') : t(lang, 'favSave'), `fav_toggle:${productId}`), style: isFav ? 'success' : 'primary' },
     Markup.button.callback(t(lang, 'btnDetail'), `product_detail:${productId}`),
     Markup.button.callback(t(lang, 'btnRate'), `review_start:${productId}`),
   ],

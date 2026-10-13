@@ -25,6 +25,20 @@ function normalizeLang(lang) {
   return DEFAULT_LANG;
 }
 
+// ─── ESKI TUGMA YOZUVLARI (eski klaviaturasi qolganlar ham ishlashi uchun) ───
+const LEGACY = {
+  m_website: ['🌐 Bizning sayt', '🌐 Бизнинг сайт', '🌐 Наш сайт', '🌐 Our website'],
+  m_products: ['🛍️ Mahsulotlar', '🛍️ Маҳсулотлар', '🛍️ Товары', '🛍️ Products'],
+  m_orders: ['📋 Buyurtmalarim', '📋 Буюртмаларим', '📋 Мои заказы', '📋 My orders'],
+  m_profile: ['👤 Profilim', '👤 Профилим', '👤 Профиль', '👤 Profile'],
+  m_loyalty: ['🎁 Bonus va Sodiqlik', '🎁 Бонус ва Содиқлик', '🎁 Бонусы и Лояльность', '🎁 Bonus & Loyalty'],
+  m_delivery: ['📍 Yetkazib berish', '📍 Етказиб бериш', '📍 Доставка', '📍 Delivery'],
+  m_about: ['ℹ️ Haqida', 'ℹ️ Ҳақида', 'ℹ️ О нас', 'ℹ️ About'],
+  m_sales: ['⭐ Aksiyalar', '⭐ Акциялар', '⭐ Акции', '⭐ Promotions'],
+  m_language: ['🌐 Til', '🌐 Тил', '🌐 Язык', '🌐 Language'],
+  m_pickup: ['🏪 Borib olish', '🏪 Бориб олиш', '🏪 Самовывоз', '🏪 Pickup'],
+};
+
 // ─── TARJIMALAR ──────────────────────────────────────────────────────────────
 const T = {
   // ── UMUMIY ──
@@ -45,19 +59,19 @@ const T = {
   no:            { uz: "❌ Yo'q", uz_cyrl: '❌ Йўқ', ru: '❌ Нет', en: '❌ No' },
 
   // ── ASOSIY MENYU TUGMALARI (reply keyboard) ──
-  m_website:   { uz: '🌐 Bizning sayt', uz_cyrl: '🌐 Бизнинг сайт', ru: '🌐 Наш сайт', en: '🌐 Our website' },
-  m_products:  { uz: '🛍️ Mahsulotlar', uz_cyrl: '🛍️ Маҳсулотлар', ru: '🛍️ Товары', en: '🛍️ Products' },
+  m_website:   { uz: '💻 Sayt', uz_cyrl: '💻 Сайт', ru: '💻 Сайт', en: '💻 Website' },
+  m_products:  { uz: '🛍️ Katalog', uz_cyrl: '🛍️ Каталог', ru: '🛍️ Каталог', en: '🛍️ Catalog' },
   m_cart:      { uz: '🛒 Savat', uz_cyrl: '🛒 Сават', ru: '🛒 Корзина', en: '🛒 Cart' },
-  m_orders:    { uz: '📋 Buyurtmalarim', uz_cyrl: '📋 Буюртмаларим', ru: '📋 Мои заказы', en: '📋 My orders' },
-  m_profile:   { uz: '👤 Profilim', uz_cyrl: '👤 Профилим', ru: '👤 Профиль', en: '👤 Profile' },
+  m_orders:    { uz: '📝 Buyurtmalar', uz_cyrl: '📝 Буюртмалар', ru: '📝 Заказы', en: '📝 Orders' },
+  m_profile:   { uz: '🪪 Profil', uz_cyrl: '🪪 Профил', ru: '🪪 Профиль', en: '🪪 Profile' },
   m_favorites: { uz: '❤️ Sevimlilar', uz_cyrl: '❤️ Севимлилар', ru: '❤️ Избранное', en: '❤️ Favorites' },
-  m_loyalty:   { uz: '🎁 Bonus va Sodiqlik', uz_cyrl: '🎁 Бонус ва Содиқлик', ru: '🎁 Бонусы и Лояльность', en: '🎁 Bonus & Loyalty' },
-  m_delivery:  { uz: '📍 Yetkazib berish', uz_cyrl: '📍 Етказиб бериш', ru: '📍 Доставка', en: '📍 Delivery' },
+  m_loyalty:   { uz: '💎 Bonuslar', uz_cyrl: '💎 Бонуслар', ru: '💎 Бонусы', en: '💎 Bonuses' },
+  m_delivery:  { uz: '🚗 Yetkazish', uz_cyrl: '🚗 Етказиш', ru: '🚗 Доставка', en: '🚗 Delivery' },
   m_contact:   { uz: '📞 Aloqa', uz_cyrl: '📞 Алоқа', ru: '📞 Контакты', en: '📞 Contact' },
-  m_about:     { uz: 'ℹ️ Haqida', uz_cyrl: 'ℹ️ Ҳақида', ru: 'ℹ️ О нас', en: 'ℹ️ About' },
-  m_sales:     { uz: '⭐ Aksiyalar', uz_cyrl: '⭐ Акциялар', ru: '⭐ Акции', en: '⭐ Promotions' },
-  m_language:  { uz: '🌐 Til', uz_cyrl: '🌐 Тил', ru: '🌐 Язык', en: '🌐 Language' },
-  m_pickup:    { uz: '🏪 Borib olish', uz_cyrl: '🏪 Бориб олиш', ru: '🏪 Самовывоз', en: '🏪 Pickup' },
+  m_about:     { uz: '💡 Biz haqimizda', uz_cyrl: '💡 Биз ҳақимизда', ru: '💡 О нас', en: '💡 About' },
+  m_sales:     { uz: '🔥 Aksiyalar', uz_cyrl: '🔥 Акциялар', ru: '🔥 Акции', en: '🔥 Deals' },
+  m_language:  { uz: '🗣 Til', uz_cyrl: '🗣 Тил', ru: '🗣 Язык', en: '🗣 Language' },
+  m_pickup:    { uz: '🏛 Olib ketish', uz_cyrl: '🏛 Олиб кетиш', ru: '🏛 Самовывоз', en: '🏛 Pickup' },
 
   // ── BORIB OLISH MANZILLARI ──
   pickupInfoTitle: {
@@ -196,7 +210,9 @@ const T = {
   catalogStats: { uz: "📦 {n} ta mahsulot · {c} ta bo'lim", uz_cyrl: '📦 {n} та маҳсулот · {c} та бўлим', ru: '📦 {n} товаров · {c} разделов', en: '📦 {n} products · {c} sections' },
   catalogHint: { uz: "Bo'limni tanlang yoki 🔍 qidiruvdan foydalaning 👇", uz_cyrl: 'Бўлимни танланг ёки 🔍 қидирувдан фойдаланинг 👇', ru: 'Выберите раздел или воспользуйтесь 🔍 поиском 👇', en: 'Pick a section or use 🔍 search 👇' },
   pageOf: { uz: '{p}/{n}-sahifa', uz_cyrl: '{p}/{n}-саҳифа', ru: 'стр. {p}/{n}', en: 'page {p}/{n}' },
-  inStockOrder: { uz: 'Sotuvda ✅', uz_cyrl: 'Сотувда ✅', ru: 'В продаже ✅', en: 'Available ✅' },
+  inStockOrder: { uz: 'Sotuvda', uz_cyrl: 'Сотувда', ru: 'В продаже', en: 'Available' },
+  favSave: { uz: '❤️ Saqlash', uz_cyrl: '❤️ Сақлаш', ru: '❤️ В избранное', en: '❤️ Save' },
+  favSaved: { uz: '❤️ Saqlangan', uz_cyrl: '❤️ Сақланган', ru: '❤️ В избранном', en: '❤️ Saved' },
   reviewsWord: { uz: 'sharh', uz_cyrl: 'шарҳ', ru: 'отзыв(ов)', en: 'reviews' },
   inYourCart: { uz: 'Savatingizda', uz_cyrl: 'Саватингизда', ru: 'В корзине', en: 'In your cart' },
   soldOut: { uz: "❌ Sotib bo'lingan", uz_cyrl: '❌ Сотиб бўлинган', ru: '❌ Распродано', en: '❌ Sold out' },
@@ -661,12 +677,16 @@ function variants(key) {
   const entry = T[key];
   if (!entry) return [];
   // Premium ikonka qo'yilgan tugmalarda matn emoji'siz yuboriladi — ikkalasini ham qabul qilamiz
-  const { stripLeadingEmoji } = require('./premium');
+  // Tugma yozuvi bir necha ko'rinishda kelishi mumkin: asl, emoji almashtirilgan,
+  // premium ikonka qo'yilgan (emoji'siz) va eski versiyadagi yozuv.
+  const { stripLeadingEmoji, replaceEmojis } = require('./premium');
   const out = new Set();
-  LANGS.map(l => entry[l]).filter(Boolean).forEach(v => {
-    out.add(v);
-    const bare = stripLeadingEmoji(v).trim();
-    if (bare && bare !== v) out.add(bare);
+  [...LANGS.map(l => entry[l]), ...(LEGACY[key] || [])].filter(Boolean).forEach(v => {
+    for (const x of [v, replaceEmojis(v)]) {
+      out.add(x);
+      const bare = stripLeadingEmoji(x).trim();
+      if (bare) out.add(bare);
+    }
   });
   return [...out];
 }

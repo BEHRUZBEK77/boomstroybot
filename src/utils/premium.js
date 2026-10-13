@@ -52,6 +52,43 @@ async function save() {
   await docRef().set({ map: state.map, stickers: state.stickers, updatedAt: new Date() }, { merge: false });
 }
 
+// ── MINIMALISTIK EMOJI TO'PLAMI ──────────────────────────────────────────────
+// Botdagi har bir emoji Telegram rasmiy premium to'plamidagi ma'nosi yaqin
+// emojiga almashtiriladi. '' — emoji olib tashlanadi (bezak, tugma rangi o'zi
+// ma'noni beradi). Natija: barcha emojilar animatsion premium.
+const EMOJI_REPLACE = {
+  '❌': '❗', '⚠': '❗', '⛔': '❗', '🆘': '❗', '🛑': '❗', '🔴': '❗',
+  '📋': '📝', '🧾': '📝', '📒': '📚',
+  '🎁': '💎', '✨': '⭐', '🙏': '❤', '💔': '❤', '👋': '🎉', '💥': '🔥', '🆕': '🔥',
+  '🏪': '🏛', '🏗': '🏛', '🏙': '🏛', '🏦': '🏛', '🏭': '💼',
+  '📍': '🏁', '🗺': '🏁', '📌': '🔝',
+  '📦': '🛍', '🚚': '🚗', '📏': '🚗',
+  '🌐': '💻', '⚙': '💻', '🔗': '💻',
+  '💳': '💸', '🆔': '🪪', '👤': '🪪', '🔐': '🪪', '👥': '🗣',
+  '⏳': '📆', '🕐': '📆', '⏰': '📆', '📅': '📆',
+  '📢': '📣', '🔔': '📣', '📤': '📣',
+  'ℹ': '💡', '📐': '🧮', '🔧': '🧪', '🔄': '⚡', '🚀': '⚡', '🟡': '⚡', '🟢': '✅',
+  '🏷': '🎟', '🔖': '🎟', '✏': '✍', '📲': '📱', '📧': '💬', '📩': '💬', '👁': '👀',
+  '🥉': '🎖', '🥈': '🎖', '🥇': '🏆',
+  '🔙': '', '🗑': '', '🧹': '', '👇': '', '⏭': '', '🇺🇿': '', '🇷🇺': '', '🇬🇧': '',
+};
+// Belgilar (emoji emas) — minimalistik
+const SYMBOL_REPLACE = { '⬅': '‹', '➡': '›', '➕': '+', '➖': '−' };
+
+const ANY_EMOJI_RE = /(?:\p{Extended_Pictographic}|\p{Regional_Indicator})(?:\uFE0F|\u200D\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator})*/gu;
+
+function replaceEmojis(text) {
+  if (typeof text !== 'string' || !text) return text;
+  const out = text.replace(ANY_EMOJI_RE, (m) => {
+    const k = m.replace(/\uFE0F/g, '');
+    if (k in SYMBOL_REPLACE) return SYMBOL_REPLACE[k];
+    if (k in EMOJI_REPLACE) return EMOJI_REPLACE[k] ? EMOJI_REPLACE[k] : '\u0000';
+    return m;
+  });
+  // olib tashlangan emojidan keyingi ortiqcha bo'shliqni ham tozalaymiz
+  return out.includes('\u0000') ? out.replace(/\u0000[ \t]?/g, '').replace(/^[ \t]+/gm, (sp) => sp) : out;
+}
+
 // ── Emoji yordamchilari ──────────────────────────────────────────────────────
 // Matn boshidagi emoji klasterini ajratadi ("🛒 Savat" → ["🛒", "Savat"])
 const LEADING_EMOJI_RE = /^((?:\p{Extended_Pictographic}|\p{Regional_Indicator})(?:️|‍(?:\p{Extended_Pictographic})|\p{Emoji_Modifier}|\p{Regional_Indicator})*)\s*/u;
@@ -110,9 +147,8 @@ async function autoLoadEmoji(telegram) {
 
 // ── Tugma ranglari (callback_data bo'yicha) ──────────────────────────────────
 const STYLE_RULES = [
-  [/^(order_confirm|qty_confirm:|cart_add:|admin_confirm:|admin_pay_ok:|admin_deliver:|reward_redeem:|loyalty_daily|check_sub|fav_add_all_cart)/, 'success'],
-  [/^(cancel_order|cart_clear|admin_cancel:|admin_pay_fail:|wh_del:|review_cancel)/, 'danger'],
-  [/^(order_start|view_cart|search_start|admin_ship:)/, 'primary'],
+  [/^(order_confirm|order_start|qty_confirm:|cart_add:|cart_inc:|admin_confirm:|admin_pay_ok:|admin_deliver:|reward_redeem:|loyalty_daily|check_sub|fav_add_all_cart|pay_cash|pay_card|recv_|pickup_wh:|send_location|wh_add|support_new)/, 'success'],
+  [/^(cancel_order|cart_clear|cart_dec:|admin_cancel:|admin_pay_fail:|wh_del:|stk_del:|review_cancel)/, 'danger'],
 ];
 function styleForCallback(data) {
   for (const [re, st] of STYLE_RULES) if (re.test(data)) return st;
@@ -130,8 +166,8 @@ function styleForReplyText(text) {
       replyStyles.set(stripLeadingEmoji(v), st);
     });
     set('cancel', 'danger');
-    set('m_products', 'primary');
     set('m_cart', 'success');
+    set('am_userMenu', 'success');
     set('btnSharePhone', 'success');
     set('btnSendLocation', 'success');
   }
@@ -140,11 +176,11 @@ function styleForReplyText(text) {
 
 function decorateButton(btn, isReply) {
   if (!btn || typeof btn !== 'object' || typeof btn.text !== 'string') return btn;
-  const out = { ...btn };
+  const out = { ...btn, text: replaceEmojis(btn.text).trim() || btn.text };
 
   if (!out.style) {
-    const st = isReply ? styleForReplyText(out.text) : (out.callback_data ? styleForCallback(out.callback_data) : null);
-    if (st) out.style = st;
+    const st = isReply ? styleForReplyText(btn.text) : (out.callback_data ? styleForCallback(out.callback_data) : null);
+    out.style = st || 'primary'; // barcha tugmalar rangli
   }
 
   if (!out.icon_custom_emoji_id) {
@@ -152,6 +188,9 @@ function decorateButton(btn, isReply) {
     const id = customIdFor(emoji);
     if (id && rest.trim()) {
       out.icon_custom_emoji_id = id;
+      out.text = rest;
+    } else if (emoji && rest.trim() && !state.iconsDisabled && Object.keys(state.auto).length) {
+      // Premium varianti yo'q emoji (masalan, bazadagi bo'lim ikonkasi) — minimalistik: olib tashlaymiz
       out.text = rest;
     }
   }
@@ -209,6 +248,16 @@ const TEXT_METHODS = {
 
 // Markdown matnni entities'ga o'girib, oddiy emojilarga premium emoji qo'shadi.
 // O'zgartirish kerak bo'lmasa — null qaytaradi.
+// Xabar matnidagi emojilarni minimalistik to'plamga almashtiradi (premiumdan qat'i nazar)
+function normalizeText(method, payload) {
+  const spec = TEXT_METHODS[method];
+  if (!spec) return payload;
+  const field = spec[0];
+  if (typeof payload[field] !== 'string' || payload[spec[1]]) return payload;
+  const replaced = replaceEmojis(payload[field]);
+  return replaced === payload[field] ? payload : { ...payload, [field]: replaced };
+}
+
 function decorateText(method, payload) {
   if (state.textDisabled) return null;
   const map = effectiveMap();
@@ -258,5 +307,5 @@ module.exports = {
   state, STICKER_SLOTS, loadPremium, save,
   splitLeadingEmoji, stripLeadingEmoji, baseEmoji,
   decorateMarkup, hasIcons, stripIcons, disableIcons, sendSticker,
-  decorateText, disableText, textWorked, iconsWorked, autoLoadEmoji, effectiveMap,
+  decorateText, normalizeText, replaceEmojis, disableText, textWorked, iconsWorked, autoLoadEmoji, effectiveMap,
 };

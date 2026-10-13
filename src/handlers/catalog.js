@@ -158,7 +158,7 @@ function productCardText(p, cat, cartQty, lang) {
   const rating = p.avgRating ? `⭐ ${Number(p.avgRating).toFixed(1)} · ${p.reviewCount || 0} ${t(lang, 'reviewsWord')}\n` : '';
   const stockLine = isStockTracked(p)
     ? `${st.emoji} ${t(lang, 'available')}: ${totalStock(p)} ${esc(unit)}`
-    : `🟢 ${t(lang, 'inStockOrder')}`;
+    : `✅ ${t(lang, 'inStockOrder')}`;
 
   return (
     `${mdBold(p.name)}\n${LINE}\n` +

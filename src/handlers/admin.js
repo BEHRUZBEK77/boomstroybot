@@ -333,7 +333,7 @@ async function handleBroadcastMessage(ctx) {
   const s = getSession(ctx.from.id);
   if (s.step !== 'admin_broadcast' || !isAdmin(ctx)) return;
 
-  if (ctx.message.text === '❌ Bekor qilish') {
+  if (require('../utils/i18n').variantsOf('cancel').includes(ctx.message.text)) {
     setSession(ctx.from.id, { step: null });
     return ctx.reply('Bekor qilindi.', adminMainMenu());
   }

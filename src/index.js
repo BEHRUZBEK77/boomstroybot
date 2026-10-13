@@ -77,6 +77,7 @@ setBotInstance(bot);
         payload = { ...payload, reply_markup: premium.decorateMarkup(payload.reply_markup) };
       }
 
+      payload = premium.normalizeText(method, payload);
       const withEmoji = premium.decorateText(method, payload);
       if (withEmoji) {
         try {
