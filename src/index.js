@@ -397,7 +397,7 @@ const PORT = Number(process.env.PORT) || 3000;
 const BASE_URL = (
   process.env.WEBHOOK_URL ||
   (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '')
-).replace(/\/+$/, '');
+).trim().replace(/\/+$/, '').replace(/^(?!https?:\/\/)(?=.)/i, 'https://').replace(/^http:\/\//i, 'https://');
 const USE_WEBHOOK = Boolean(BASE_URL) && process.env.USE_POLLING !== 'true';
 
 const WEBHOOK_PATH = '/webhook';
