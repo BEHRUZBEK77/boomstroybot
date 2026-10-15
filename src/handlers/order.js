@@ -9,7 +9,7 @@ const { t, langOf } = require('../utils/i18n');
 const { Markup } = require('telegraf');
 const { buildCartSummary } = require('./cart');
 
-const ADMIN_IDS = (process.env.ADMIN_TELEGRAM_ID || '').split(',').map(s => s.trim()).filter(Boolean);
+const { ADMIN_IDS } = require('../utils/admins');
 const ADMIN_GROUP = process.env.ADMIN_GROUP_ID;
 
 function payLabel(lang, payType, isPickup) {
@@ -100,6 +100,8 @@ async function handlePickupWarehouseSelect(ctx, warehouseId) {
     deliveryType: 'pickup',
     pickupWarehouseId: wh.id,
     pickupWarehouseName: wh.name,
+    orderAddress: wh.address || wh.name,
+    orderCity: wh.name,
     deliveryFee: 0,
     deliveryDistance: 0,
   });
@@ -215,7 +217,7 @@ async function handlePaymentChoice(ctx, payType) {
   await ctx.answerCbQuery();
   const s = getSession(ctx.from.id);
 
-  if (!s.orderAddress) {
+  if (!s.orderAddress && !(s.deliveryType === 'pickup' && s.pickupWarehouseId)) {
     return ctx.reply(t(lang, 'payExpired'), mainMenu(lang));
   }
 
@@ -264,7 +266,7 @@ async function handlePaymentPhoto(ctx) {
 async function showOrderSummary(ctx, s, cart, total, grandTotal, payType, isPickup) {
   const lang = langOf(ctx);
   const items = cart.map((i, idx) =>
-    `${idx + 1}. ${i.name} × ${i.qty} = ${fmtNum(i.qty * i.price)} ${t(lang, 'som')}`
+    `${idx + 1}. ${require('../utils/helpers').escapeMarkdown(i.name)} × ${i.qty} = ${fmtNum(i.qty * i.price)} ${t(lang, 'som')}`
   ).join('\n');
 
   const recv = isPickup
@@ -415,11 +417,11 @@ async function notifyAdmins(ctx, order, orderId, s) {
   const adminText =
     `🆕 *YANGI BUYURTMA!*\n\n` +
     `📋 №: *${order.orderNumber}*\n` +
-    `👤 Mijoz: ${order.customerName}\n` +
+    `👤 Mijoz: ${require('../utils/helpers').escapeMarkdown(order.customerName)}\n` +
     `📱 Tel: ${order.customerPhone || '-'}\n` +
-    `🆔 TG: @${order.customerUsername || '-'} (${order.telegramId})\n\n` +
+    `🆔 TG: @${require('../utils/helpers').escapeMarkdown(order.customerUsername || '-')} (${order.telegramId})\n\n` +
     `🛒 *Mahsulotlar:*\n` +
-    order.items.map(i => `• ${i.name} × ${i.qty} = ${fmtNum(i.qty * i.price)} so'm`).join('\n') +
+    order.items.map(i => `• ${require('../utils/helpers').escapeMarkdown(i.name)} × ${i.qty} = ${fmtNum(i.qty * i.price)} so'm`).join('\n') +
     `\n\n💰 Mahsulot: ${fmtNum(order.total)} so'm\n` +
     `🚚 Yetkazib berish: ${isPickup ? '0 (borib olish)' : fmtNum(order.deliveryFee)} so'm\n` +
     `💳 *JAMI: ${fmtNum(order.grandTotal)} so'm*\n\n` +
@@ -444,7 +446,7 @@ async function notifyAdmins(ctx, order, orderId, s) {
           const prod = allProducts.find(p => p.id === item.productId);
           return {
             type: 'photo', media: prod.imageUrl,
-            caption: idx === 0 ? `🖼️ *Buyurtma rasmlari*\n📋 ${order.orderNumber}` : `📦 ${item.name} × ${item.qty}`,
+            caption: idx === 0 ? `🖼️ *Buyurtma rasmlari*\n📋 ${order.orderNumber}` : `📦 ${require('../utils/helpers').escapeMarkdown(item.name)} × ${item.qty}`,
             parse_mode: 'Markdown',
           };
         });
@@ -524,7 +526,7 @@ async function handleViewMyOrder(ctx, orderId) {
     ? t(lang, 'acceptedRecvPickup', { wh: order.pickupWarehouseName || order.deliveryAddress })
     : t(lang, 'recvDeliveryBlock', { city: order.deliveryCity || order.deliveryAddress, dist: order.deliveryDistance || 0, fee: fmtNum(order.deliveryFee), som });
 
-  const items = (order.items || []).map(i => `• ${i.name} × ${i.qty} = ${fmtNum(i.qty * i.price)} ${som}`).join('\n');
+  const items = (order.items || []).map(i => `• ${require('../utils/helpers').escapeMarkdown(i.name)} × ${i.qty} = ${fmtNum(i.qty * i.price)} ${som}`).join('\n');
   const text = t(lang, 'orderDetail', {
     num: order.orderNumber,
     status: orderStatusLabel(order.status, lang),

@@ -10,7 +10,7 @@ async function notAdmin(ctx) {
   console.log(`ℹ️ Admin bo'lmagan foydalanuvchi admin buyrug'ini yubordi: ${ctx.from.id}`);
   return ctx.reply(
     `⛔ Bu buyruq faqat adminlar uchun.\n\nSizning Telegram ID: \`${ctx.from.id}\`\n` +
-    `Admin bo'lish uchun Railway → Variables → ADMIN_TELEGRAM_ID ga shu raqamni qo'shing.`,
+    `Admin bo'lish uchun Railway → Variables → ADMIN_EXTRA_IDS ga shu raqamni qo'shing.`,
     { parse_mode: 'Markdown' }
   );
 }

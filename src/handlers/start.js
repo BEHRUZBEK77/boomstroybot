@@ -5,7 +5,7 @@ const { t, langOf, normalizeLang } = require('../utils/i18n');
 const cfg = require('../services/config');
 const { Markup } = require('telegraf');
 
-const ADMIN_IDS = (process.env.ADMIN_TELEGRAM_ID || '').split(',').map(s => s.trim()).filter(Boolean);
+const { ADMIN_IDS } = require('../utils/admins');
 
 function defaultUserShape(ctx, extra = {}) {
   const tgId = String(ctx.from.id);
@@ -60,15 +60,15 @@ async function handleStart(ctx) {
   await require('../utils/premium').sendSticker(ctx.telegram, ctx.chat.id, 'welcome');
 
   // Admin uchun alohida menyu
-  if (user.isAdmin) {
-    await ctx.reply(t(lang, 'adminWelcome', { name: user.firstName }), { parse_mode: 'Markdown', ...adminMainMenu(lang) });
+  if (ctx.state.isAdmin) {
+    await ctx.reply(t(lang, 'adminWelcome', { name: require('../utils/helpers').escapeMarkdown(user.firstName) }), { parse_mode: 'Markdown', ...adminMainMenu(lang) });
     return;
   }
 
   await handleReferralFromStart(ctx, user);
 
   if (!user.phone) {
-    await ctx.reply(t(lang, 'askPhone', { name: user.firstName || t(lang, 'dearCustomer') }),
+    await ctx.reply(t(lang, 'askPhone', { name: require('../utils/helpers').escapeMarkdown(user.firstName) || t(lang, 'dearCustomer') }),
       { parse_mode: 'Markdown', ...sharePhoneButton(lang) });
     setSession(ctx.from.id, { step: 'waiting_phone' });
     return;
@@ -86,7 +86,7 @@ async function handleCheckSub(ctx) {
   const user = await getOrCreateUser(ctx);
 
   if (!user.phone) {
-    await ctx.reply(t(lang, 'askPhone', { name: user.firstName || t(lang, 'dearCustomer') }), { parse_mode: 'Markdown', ...sharePhoneButton(lang) });
+    await ctx.reply(t(lang, 'askPhone', { name: require('../utils/helpers').escapeMarkdown(user.firstName) || t(lang, 'dearCustomer') }), { parse_mode: 'Markdown', ...sharePhoneButton(lang) });
     setSession(ctx.from.id, { step: 'waiting_phone', user });
     return;
   }
@@ -124,7 +124,7 @@ async function showWelcome(ctx, user) {
   const lang = normalizeLang(user.lang || ctx.state.lang);
   ctx.state.lang = lang;
   await ctx.reply(
-    t(lang, 'welcome', { name: user.firstName, phone: cfg.get('supportPhone'), site: cfg.get('siteUrl') }),
+    t(lang, 'welcome', { name: require('../utils/helpers').escapeMarkdown(user.firstName), phone: cfg.get('supportPhone'), site: cfg.get('siteUrl') }),
     { parse_mode: 'Markdown', ...mainMenu(lang) }
   );
 }

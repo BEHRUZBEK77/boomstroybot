@@ -45,39 +45,139 @@ function rebuildAll() {
 
 onRateChange(() => { if (raw.size) rebuildAll(); });
 
+// ─── KESH (Firebase Storage) ──────────────────────────────────────────────────
+// Bepul Firestore rejasida kuniga 50 000 o'qish bor. Har ishga tushishda 3800+
+// mahsulotni o'qish limitni tez tugatadi (13–14-oktabrda shunday bo'lgan).
+// Shuning uchun katalog Storage'dagi JSON faylda saqlanadi, ishga tushishda
+// undan yuklanadi va Firestore'dan faqat o'shandan beri O'ZGARGAN mahsulotlar
+// o'qiladi. Kuniga bir marta (04:00) to'liq yangilanadi.
+const CACHE_PATH = 'cache/catalog-v1.json';
+const CACHE_MAX_AGE = 26 * 60 * 60 * 1000;
+let dirty = false;
+let lastFullSync = 0;
+
+function revive(v) {
+  if (v && typeof v === 'object') {
+    if (typeof v._seconds === 'number' && typeof v._nanoseconds === 'number' && Object.keys(v).length === 2) {
+      const { admin } = require('./firebase');
+      return new admin.firestore.Timestamp(v._seconds, v._nanoseconds);
+    }
+    for (const k of Object.keys(v)) v[k] = revive(v[k]);
+  }
+  return v;
+}
+
+function bucket() { return require('./firebase').getStorage().bucket(); }
+
+async function loadCache() {
+  const [buf] = await bucket().file(CACHE_PATH).download();
+  const data = JSON.parse(buf.toString('utf8'));
+  if (!data?.ts || !data.docs) return null;
+  return { ts: data.ts, full: data.full || data.ts, docs: revive(data.docs) };
+}
+
+async function saveCache() {
+  if (!dirty || !raw.size) return;
+  dirty = false;
+  const docs = Object.fromEntries(raw);
+  try {
+    await bucket().file(CACHE_PATH).save(JSON.stringify({ ts: Date.now(), full: lastFullSync, docs }), {
+      resumable: false, contentType: 'application/json',
+    });
+  } catch (e) {
+    dirty = true;
+    console.warn('Katalog keshini saqlab bo\'lmadi:', e.message);
+  }
+}
+
+function applyChange(type, id, d) {
+  if (type === 'removed') { raw.delete(id); products.delete(id); }
+  else { raw.set(id, d); products.set(id, normalizeProduct(id, d)); }
+  sortedCache = null;
+  dirty = true;
+}
+
+// Admin paneldan o'chirilganda darhol xotiradan ham olib tashlash
+function removeLocal(id) { applyChange('removed', id); }
+
+// Firestore jonli kuzatuvchi; `since` berilsa — faqat o'zgarganlar
+function listen(since, onFirst) {
+  const { getDb, admin } = require('./firebase');
+  let attempt = 0;
+  let first = true;
+  const subscribe = () => {
+    let q = getDb().collection('products');
+    if (since) q = q.where('updatedAt', '>=', admin.firestore.Timestamp.fromMillis(since - 5 * 60 * 1000));
+    const unsub = q.onSnapshot(
+      (snap) => {
+        attempt = 0;
+        // Vaqt filtri bilan "removed" — hujjat o'chirilgan degani
+        snap.docChanges().forEach((ch) => applyChange(ch.type, ch.doc.id, ch.doc.data()));
+        if (first) { first = false; onFirst?.(snap.size); }
+      },
+      (err) => {
+        attempt++;
+        const delay = Math.min(5 * 60 * 1000, 5000 * 2 ** Math.min(attempt, 6));
+        console.error(`products onSnapshot xato: ${err.message} — ${Math.round(delay / 1000)}s dan keyin qayta`);
+        try { unsub(); } catch { }
+        setTimeout(subscribe, delay);
+      }
+    );
+  };
+  subscribe();
+}
+
+// To'liq qayta o'qish (kuniga bir marta) — saytda o'chirilganlarni ham aniqlaydi
+async function fullResync() {
+  const { getDb } = require('./firebase');
+  try {
+    const snap = await getDb().collection('products').get();
+    const seen = new Set();
+    snap.docs.forEach(d => { seen.add(d.id); raw.set(d.id, d.data()); });
+    for (const id of [...raw.keys()]) if (!seen.has(id)) raw.delete(id);
+    rebuildAll();
+    lastFullSync = Date.now();
+    dirty = true;
+    await saveCache();
+    console.log(`🔄 Katalog to'liq yangilandi: ${raw.size} ta`);
+  } catch (e) {
+    console.error('Katalogni to\'liq yangilab bo\'lmadi:', e.message);
+  }
+}
+
+function markReady(src) {
+  if (ready) return;
+  ready = true;
+  console.log(`✅ Katalog yuklandi: ${products.size} ta mahsulot (${src})`);
+}
+
 function startCatalog() {
   if (readyPromise) return readyPromise;
-  const { getDb } = require('./firebase');
-  readyPromise = new Promise((resolve) => {
-    let attempt = 0;
-    const subscribe = () => {
-      const unsub = getDb().collection('products').onSnapshot(
-        (snap) => {
-          attempt = 0;
-          snap.docChanges().forEach((ch) => {
-            if (ch.type === 'removed') { raw.delete(ch.doc.id); products.delete(ch.doc.id); return; }
-            const d = ch.doc.data();
-            raw.set(ch.doc.id, d);
-            products.set(ch.doc.id, normalizeProduct(ch.doc.id, d));
-          });
-          sortedCache = null;
-          if (!ready) {
-            ready = true;
-            console.log(`✅ Katalog yuklandi: ${products.size} ta mahsulot`);
-            resolve();
-          }
-        },
-        (err) => {
-          attempt++;
-          const delay = Math.min(5 * 60 * 1000, 5000 * 2 ** Math.min(attempt, 6));
-          console.error(`products onSnapshot xato: ${err.message} — ${Math.round(delay / 1000)}s dan keyin qayta`);
-          try { unsub(); } catch { }
-          setTimeout(subscribe, delay);
-        }
-      );
-    };
-    subscribe();
-  });
+  readyPromise = (async () => {
+    let cache = null;
+    try { cache = await loadCache(); } catch (e) {
+      if (!/No such object|404/i.test(e.message)) console.warn('Katalog keshi o\'qilmadi:', e.message);
+    }
+
+    if (cache && Date.now() - cache.ts < CACHE_MAX_AGE) {
+      for (const [id, d] of Object.entries(cache.docs)) raw.set(id, d);
+      rebuildAll();
+      lastFullSync = cache.full;
+      markReady('kesh');
+      listen(cache.ts, (n) => { if (n) console.log(`🔄 Keshdan keyin o'zgargan: ${n} ta`); });
+    } else {
+      await new Promise((resolve) => listen(null, () => {
+        lastFullSync = Date.now();
+        markReady('Firestore');
+        resolve();
+      }));
+    }
+
+    setInterval(saveCache, 10 * 60 * 1000).unref();
+    setTimeout(saveCache, 30 * 1000).unref();
+    // Kuniga bir marta to'liq yangilash (Toshkent 04:00)
+    require('node-cron').schedule('0 4 * * *', fullResync, { timezone: 'Asia/Tashkent' });
+  })();
   return readyPromise;
 }
 
@@ -106,6 +206,6 @@ function isAvailable(p) {
 }
 
 module.exports = {
-  startCatalog, isReady, allProducts, getProduct, isAvailable,
+  startCatalog, isReady, removeLocal, saveCache, fullResync, allProducts, getProduct, isAvailable,
   normalizeProduct, isStockTracked,
 };

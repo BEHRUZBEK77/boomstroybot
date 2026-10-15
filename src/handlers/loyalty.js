@@ -18,7 +18,7 @@ const {
 const { t, langOf, normalizeLang } = require('../utils/i18n');
 const { Markup } = require('telegraf');
 
-const ADMIN_IDS = (process.env.ADMIN_TELEGRAM_ID || '').split(',').map(s => s.trim()).filter(Boolean);
+const { ADMIN_IDS } = require('../utils/admins');
 
 // ─── 1. FOYDALANUVCHI YORDAMCHISI ────────────────────────────────────────────
 async function getTgUser(telegramId) {
@@ -162,7 +162,7 @@ async function handleRewardDetail(ctx, rewardId) {
     : (canRedeem ? t(lang, 'rewardEnough') : t(lang, 'rewardNotEnough', { need: fmtNum(cost - points) }));
 
   const text = t(lang, 'rewardDetail', {
-    name: reward.name,
+    name: require('../utils/helpers').escapeMarkdown(reward.name),
     desc: reward.description ? `${reward.description}\n\n` : '',
     cost: fmtNum(cost), value: fmtNum(cost * pointValue()),
     stock, points: fmtNum(points), status, som: t(lang, 'som'),
@@ -214,7 +214,7 @@ async function handleRewardRedeem(ctx, rewardId) {
 
   const remaining = Math.max(0, points - cost);
   await ctx.editMessageText(
-    t(lang, 'rewardRedeemed', { name: reward.name, cost: fmtNum(cost), points: fmtNum(remaining) }),
+    t(lang, 'rewardRedeemed', { name: require('../utils/helpers').escapeMarkdown(reward.name), cost: fmtNum(cost), points: fmtNum(remaining) }),
     { parse_mode: 'Markdown', ...backTo(lang, 'rewards_shop') }
   );
 
@@ -222,7 +222,7 @@ async function handleRewardRedeem(ctx, rewardId) {
   for (const adminId of ADMIN_IDS) {
     try {
       await ctx.telegram.sendMessage(adminId,
-        `🎁 *Yangi sovg'a so'rovi!*\n\n👤 ${user.firstName} (${ctx.from.id})\n📱 ${user.phone || '-'}\n🎁 ${reward.name}\n💰 ${fmtNum(cost)} ball`,
+        `🎁 *Yangi sovg'a so'rovi!*\n\n👤 ${require('../utils/helpers').escapeMarkdown(user.firstName)} (${ctx.from.id})\n📱 ${user.phone || '-'}\n🎁 ${require('../utils/helpers').escapeMarkdown(reward.name)}\n💰 ${fmtNum(cost)} ball`,
         { parse_mode: 'Markdown' }
       );
     } catch { }
@@ -518,7 +518,7 @@ async function notifyPriceDropSubscribers(bot, productId, oldPrice, newPrice) {
     try {
       const lang = normalizeLang(u.lang);
       await bot.telegram.sendMessage(u.telegramId,
-        t(lang, 'priceDrop', { name: product.name, old: fmtNum(oldPrice), new: fmtNum(newPrice), som: t(lang, 'som') }),
+        t(lang, 'priceDrop', { name: require('../utils/helpers').escapeMarkdown(product.name), old: fmtNum(oldPrice), new: fmtNum(newPrice), som: t(lang, 'som') }),
         { parse_mode: 'Markdown' });
       await arrayRemoveField('telegramUsers', u.id, 'priceAlerts', productId);
     } catch { }
@@ -533,7 +533,7 @@ async function notifyStockArrivalSubscribers(bot, productId) {
     try {
       const lang = normalizeLang(u.lang);
       await bot.telegram.sendMessage(u.telegramId,
-        t(lang, 'stockArrived', { name: product.name, price: fmtNum(product.price), som: t(lang, 'som') }),
+        t(lang, 'stockArrived', { name: require('../utils/helpers').escapeMarkdown(product.name), price: fmtNum(product.price), som: t(lang, 'som') }),
         { parse_mode: 'Markdown' });
       await arrayRemoveField('telegramUsers', u.id, 'stockAlerts', productId);
     } catch { }

@@ -2,7 +2,7 @@ const cron = require('node-cron');
 const { getCollection } = require('./firebase');
 const { getStockStatus, fmtNum, totalStock } = require('../utils/helpers');
 
-const ADMIN_IDS = (process.env.ADMIN_TELEGRAM_ID || '').split(',').map(s => s.trim()).filter(Boolean);
+const { ADMIN_IDS } = require('../utils/admins');
 
 let botInstance = null;
 

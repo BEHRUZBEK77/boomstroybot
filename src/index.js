@@ -139,6 +139,11 @@ bot.use((ctx, next) => {
   status.updatesHandled++;
   return next();
 });
+// Xabar (tugma emas) kelganda answerCbQuery chaqirilsa xato bermasin
+bot.use((ctx, next) => {
+  if (!ctx.callbackQuery) ctx.answerCbQuery = async () => true;
+  return next();
+});
 bot.use(authMiddleware);
 
 // ── ADMIN PANEL: kiritish bosqichlari ─────────────────────────────────────────
@@ -147,6 +152,8 @@ bot.use(authMiddleware);
 const adminPanel = require('./admin/panel');
 const adminCustomers = require('./admin/customers');
 const adminSettings = require('./admin/settings');
+let menuLabels = null;
+const MENU_LABELS = () => menuLabels || (menuLabels = new Set(variantsOf(...Object.keys(require('./utils/i18n').T).filter(k => /^(m|am)_/.test(k)))));
 const ADMIN_INPUT_STEPS = {
   ae: adminPanel.handleInput, ae_search: adminPanel.handleInput, ae_broadcast: adminPanel.handleInput,
   ac_input: adminCustomers.handleInput, as_input: adminSettings.handleInput,
@@ -157,6 +164,12 @@ bot.use(async (ctx, next) => {
   const handler = ADMIN_INPUT_STEPS[s.step];
   if (!handler) return next();
   const txt = ctx.message.text;
+  // Menyu tugmasi bosilsa — kiritish bekor qilinadi va tugma o'z ishini qiladi
+  // (masalan, ommaviy xabar kutilayotganda "Sozlamalar" bosilsa, u mijozlarga ketib qolmasin)
+  if (txt && MENU_LABELS().has(txt)) {
+    setSession(ctx.from.id, { step: null, ae: null, acInput: null, asInput: null });
+    return next();
+  }
   if (txt && (txt.startsWith('/') || variantsOf('cancel').includes(txt))) {
     setSession(ctx.from.id, { step: null, ae: null, acInput: null, asInput: null });
     if (txt.startsWith('/')) return next();
@@ -436,13 +449,13 @@ bot.on('callback_query', async (ctx) => {
     if (data === 'admin_pending_orders') return handleAdminOrders(ctx, 'pending');
     if (data.startsWith('admin_order:')) return handleAdminViewOrder(ctx, data.slice(12));
     if (data.startsWith('admin_view_order:')) return handleAdminViewOrder(ctx, data.slice(17));
-    if (data === 'admin_products') return handleAdminProducts(ctx);
+    if (data === 'admin_products') return adminPanel.handleCallback(ctx, 'ae:l:p:0');
     if (data === 'admin_low_stock') return handleAdminLowStock(ctx);
-    if (data === 'admin_customers') return handleAdminCustomers(ctx);
+    if (data === 'admin_customers') return adminCustomers.showList(ctx, 0);
     if (data === 'admin_stats') return handleAdminStats(ctx);
 
     // Omborlar boshqaruvi
-    if (data === 'admin_warehouses') return handleAdminWarehouses(ctx);
+    if (data === 'admin_warehouses') return adminPanel.handleCallback(ctx, 'ae:l:w:0');
     if (data === 'wh_add') return handleWarehouseAddStart(ctx);
     if (data.startsWith('wh_del:')) return handleWarehouseDelete(ctx, data.slice(7));
 
@@ -650,6 +663,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 // MUHIM: webhookni O'CHIRMAYMIZ — aks holda yangi versiya ishga tushguncha bot jim qoladi.
 function shutdown(signal) {
   console.log(`🛑 ${signal} olindi, to'xtatilmoqda...`);
+  require('./services/catalog').saveCache().catch(() => { });
   if (!USE_WEBHOOK) { try { bot.stop(signal); } catch { } }
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 8000).unref();

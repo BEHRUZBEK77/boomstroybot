@@ -7,12 +7,14 @@ let db, storage;
 // uchun xotirada vaqtinchalik saqlaymiz — har foydalanuvchi bosganda emas,
 // har CACHE_TTL millisekundda bir marta Firestore'dan o'qiladi.
 const CACHE_TTL_MS = 2 * 60 * 1000; // 2 daqiqa
-const CACHEABLE = new Set(['products', 'categories', 'warehouses']);
+// Kolleksiya → kesh muddati (ms). Bot o'zi yozganda kesh darhol tozalanadi.
+const CACHE_TTL = { products: CACHE_TTL_MS, categories: CACHE_TTL_MS, warehouses: CACHE_TTL_MS, rewards: CACHE_TTL_MS, orders: 30 * 1000, telegramUsers: 60 * 1000 };
+const CACHEABLE = new Set(Object.keys(CACHE_TTL));
 const cache = new Map(); // key -> { data, ts }
 
 function invalidateCache(col) {
-  if (col) cache.delete(col);
-  else cache.clear();
+  if (!col) return cache.clear();
+  for (const k of [...cache.keys()]) if (k === col || k.startsWith(col + ':')) cache.delete(k);
 }
 
 function initFirebase() {
@@ -74,7 +76,7 @@ async function getCollection(col, orderField = 'createdAt', dir = 'desc') {
   const cacheKey = `${col}:${orderField}:${dir}`;
   if (CACHEABLE.has(col)) {
     const hit = cache.get(cacheKey);
-    if (hit && (Date.now() - hit.ts) < CACHE_TTL_MS) return hit.data;
+    if (hit && (Date.now() - hit.ts) < (CACHE_TTL[col] || CACHE_TTL_MS)) return hit.data;
   }
   const db = getDb();
   let data;
@@ -145,6 +147,7 @@ async function addLog(type, message, extra = {}) {
 // ─── YANGI YORDAMCHI FUNKSIYALAR (loyalty, favorites, reviews uchun) ─────────
 
 async function incrementField(col, id, field, amount = 1) {
+  invalidateCache(col);
   const db = getDb();
   await db.collection(col).doc(id).update({
     [field]: admin.firestore.FieldValue.increment(amount),

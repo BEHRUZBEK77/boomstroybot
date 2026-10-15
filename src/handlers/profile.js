@@ -167,7 +167,7 @@ async function handlePickupInfo(ctx) {
   for (const w of all) {
     const addr = w.address ? `📌 ${w.address}\n` : '';
     const phone = w.phone ? `📞 ${w.phone}\n` : '';
-    text += t(lang, 'pickupInfoItem', { name: w.name, addr, phone });
+    text += t(lang, 'pickupInfoItem', { name: escapeMarkdown(w.name), addr: escapeMarkdown(addr), phone });
   }
   text += t(lang, 'pickupInfoFooter');
 

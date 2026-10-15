@@ -112,7 +112,7 @@ function buildCartSummary(cart, lang = 'uz') {
   cart.forEach((item, i) => {
     const sum = item.qty * item.price;
     total += sum;
-    text += `${i + 1}. ${item.name} × ${item.qty} = ${fmtNum(sum)} ${t(lang, 'som')}\n`;
+    text += `${i + 1}. ${require('../utils/helpers').escapeMarkdown(item.name)} × ${item.qty} = ${fmtNum(sum)} ${t(lang, 'som')}\n`;
   });
   text += `\n💰 *${t(lang, 'cartTotal')}: ${fmtNum(total)} ${t(lang, 'som')}*`;
   return text;

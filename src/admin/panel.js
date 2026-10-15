@@ -426,6 +426,7 @@ async function doDelete(ctx, entKey, id) {
   const e = ENT[entKey];
   const d = await rawDoc(entKey, id);
   await fb.deleteDocById(e.col, id);
+  if (entKey === 'p') catalog.removeLocal(id);
   await fb.addLog('admin', `${e.one} o'chirildi: ${d?.name || d?.code || d?.title || id}`, { by: ctx.from.id }).catch(() => { });
   await ack(ctx, "🗑 O'chirildi");
   await new Promise(r => setTimeout(r, 300));

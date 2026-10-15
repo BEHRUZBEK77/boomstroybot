@@ -4,7 +4,7 @@ const { fmtNum, fmtDate, orderStatusLabel, getStockStatus, totalStock, addStock 
 const { adminMainMenu, mainMenu, orderStatusActions, adminOrdersList } = require('../utils/keyboards');
 const { Markup } = require('telegraf');
 
-const ADMIN_IDS = (process.env.ADMIN_TELEGRAM_ID || '').split(',').map(s => s.trim()).filter(Boolean);
+const { ADMIN_IDS } = require('../utils/admins');
 
 function isAdmin(ctx) {
   return ADMIN_IDS.includes(String(ctx.from.id));
@@ -15,13 +15,11 @@ async function handleAdminDashboard(ctx) {
   if (!isAdmin(ctx)) return;
   if (ctx.callbackQuery) await ctx.answerCbQuery();
 
-  const [products, categories, customers, orders, sales, stockIns] = await Promise.all([
+  const [products, categories, customers, orders] = await Promise.all([
     getCollection('products'),
     getCollection('categories'),
-    queryDocs('orders', 'status', '!=', '___').catch(() => getCollection('orders')),
+    getCollection('telegramUsers'),
     getCollection('orders'),
-    getCollection('sales'),
-    getCollection('stockIns'),
   ]);
 
   const lowStock = products.filter(p => (getStockStatus(p).val !== 'ok'));
@@ -381,7 +379,7 @@ async function handleAdminWarehouses(ctx) {
   } else {
     warehouses.forEach((w, i) => {
       const cnt = products.filter(p => (p.warehouse || 'main') === w.id).length;
-      text += `${i + 1}. 🏪 *${w.name}*\n`;
+      text += `${i + 1}. 🏪 ${require('../utils/helpers').mdBold(w.name)}\n`;
       if (w.address) text += `   📌 ${w.address}\n`;
       if (w.phone) text += `   📞 ${w.phone}\n`;
       text += `   📦 ${cnt} ta mahsulot\n`;

@@ -1,7 +1,7 @@
 const { queryDocs } = require('../services/firebase');
 const { t, normalizeLang } = require('../utils/i18n');
 
-const ADMIN_IDS = (process.env.ADMIN_TELEGRAM_ID || '').split(',').map(s => s.trim()).filter(Boolean);
+const { ADMIN_IDS } = require('../utils/admins');
 
 // Til keshi — har bir xabarda Firestore o'qimaslik uchun (5 daqiqa TTL)
 const langCache = new Map();
@@ -12,9 +12,12 @@ function getCachedLang(userId) {
   return null;
 }
 
+const userCache = new Map();
+setInterval(() => { const now = Date.now(); for (const [k, v] of userCache) if (now - v.at > 60000) userCache.delete(k); }, 300000).unref();
+
 // Rate limiting
 const rateLimits = new Map();
-function checkRateLimit(userId, limit = 30, window = 60000) {
+function checkRateLimit(userId, limit = Number(process.env.RATE_LIMIT_PER_MIN) || 60, window = 60000) {
   const now = Date.now();
   const key = String(userId);
   const record = rateLimits.get(key) || { count: 0, resetAt: now + window };
@@ -35,15 +38,19 @@ async function authMiddleware(ctx, next) {
   ctx.state.isAdmin = ADMIN_IDS.includes(userId);
 
   // Rate limit check
-  if (!checkRateLimit(userId)) {
+  if (!checkRateLimit(userId) && !ctx.state.isAdmin) {
+    // Tugma bosilgan bo'lsa — soat belgisi osilib qolmasin
+    if (ctx.callbackQuery) return ctx.answerCbQuery(t(lang, 'rateLimited')).catch(() => { });
     return ctx.reply(t(lang, 'rateLimited'));
   }
 
   // Foydalanuvchini yuklash: til + bloklash holati
   try {
     // Firestore sekinlashsa butun bot qotib qolmasligi uchun 4 soniya chegarasi
-    const users = await Promise.race([
-      queryDocs('telegramUsers', 'telegramId', '==', userId),
+    // 30 soniyalik kesh — har bir bosishda Firestore o'qilmasin
+    const cached = userCache.get(userId);
+    const users = cached && Date.now() - cached.at < 30000 ? cached.users : await Promise.race([
+      queryDocs('telegramUsers', 'telegramId', '==', userId).then(u => { userCache.set(userId, { users: u, at: Date.now() }); return u; }),
       new Promise((_, rej) => setTimeout(() => rej(new Error('firestore timeout')), 4000)),
     ]);
     const user = users[0];
