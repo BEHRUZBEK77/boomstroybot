@@ -513,6 +513,7 @@ const BASE_URL = (
   (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '')
 ).trim().replace(/\/+$/, '').replace(/^(?!https?:\/\/)(?=.)/i, 'https://').replace(/^http:\/\//i, 'https://');
 const USE_WEBHOOK = Boolean(BASE_URL) && process.env.USE_POLLING !== 'true';
+if (BASE_URL && !process.env.PUBLIC_BASE_URL) process.env.PUBLIC_BASE_URL = BASE_URL;
 
 const WEBHOOK_PATH = '/webhook';
 const WEBHOOK_FULL_URL = `${BASE_URL}${WEBHOOK_PATH}`;
@@ -524,6 +525,29 @@ const startedAt = new Date();
 status.mode = USE_WEBHOOK ? 'webhook' : 'polling';
 
 app.get('/', (req, res) => res.send('🏗️ BoomStroy Bot ishlayapti!'));
+
+// Admin paneldan yuklangan rasmlar (Storage bo'lmasa): Telegram'dagi faylni
+// token ko'rsatmasdan uzatadi. Sayt ham, bot ham shu havoladan foydalanadi.
+const imgCache = new Map();
+app.get('/img/:fileId', async (req, res) => {
+  const fileId = String(req.params.fileId || '').replace(/\.jpg$/i, '');
+  if (!/^[\w-]{20,200}$/.test(fileId)) return res.status(400).end();
+  try {
+    let link = imgCache.get(fileId);
+    if (!link || Date.now() - link.at > 50 * 60 * 1000) {
+      link = { url: String(await bot.telegram.getFileLink(fileId)), at: Date.now() };
+      imgCache.set(fileId, link);
+    }
+    const axios = require('axios');
+    const r = await axios.get(link.url, { responseType: 'stream', timeout: 20000 });
+    res.set('Content-Type', r.headers['content-type'] || 'image/jpeg');
+    res.set('Cache-Control', 'public, max-age=604800, immutable');
+    r.data.pipe(res);
+  } catch (e) {
+    imgCache.delete(fileId);
+    res.status(404).end();
+  }
+});
 app.get('/health', (req, res) => res.json({
   status: 'ok',
   bot: 'BoomStroy',

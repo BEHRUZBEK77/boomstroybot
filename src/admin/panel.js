@@ -298,12 +298,15 @@ async function readValue(ctx, f, st) {
     const photo = m.photo?.[m.photo.length - 1];
     const doc = m.document?.mime_type?.startsWith('image/') ? m.document : null;
     if (photo || doc) {
+      const fileId = (photo || doc).file_id;
       try {
-        await ctx.reply('⏳ Rasm yuklanmoqda…');
-        return { ok: true, value: await uploadImage(ctx, (photo || doc).file_id, ENT[st.ent].col) };
+        return { ok: true, value: await uploadImage(ctx, fileId, ENT[st.ent].col) };
       } catch (e) {
+        // Storage yoqilmagan — rasm botning o'z serveri orqali beriladi
+        const base = process.env.PUBLIC_BASE_URL;
+        if (base) return { ok: true, value: `${base}/img/${encodeURIComponent(fileId)}.jpg` };
         console.error('Rasm yuklash xatosi:', e.message);
-        return { error: "Rasmni saqlab bo'lmadi (Firebase Storage). Rasm havolasini (https://…) yozib yuboring." };
+        return { error: "Rasmni saqlab bo'lmadi. Rasm havolasini (https://…) yozib yuboring." };
       }
     }
     if (/^https?:\/\/\S+$/i.test(text)) return { ok: true, value: text };

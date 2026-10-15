@@ -69,9 +69,35 @@ function revive(v) {
 
 function bucket() { return require('./firebase').getStorage().bucket(); }
 
+// Kesh ikki joyda bo'lishi mumkin: Storage (afzal) yoki Firestore `_cache` kolleksiyasi
+// (Storage yoqilmagan loyihalarda). Firestore'da JSON ~900 KB bo'laklarga bo'linadi —
+// 3800 mahsulot o'rniga 3–5 ta hujjat o'qiladi.
+const CHUNK = 300 * 1024; // belgi; UTF-8 da 3 baytgacha → 1 MB hujjat limitidan past
+let storageOk = true;
+
 async function loadCache() {
-  const [buf] = await bucket().file(CACHE_PATH).download();
-  const data = JSON.parse(buf.toString('utf8'));
+  let text = null;
+  if (storageOk) {
+    try {
+      const [buf] = await bucket().file(CACHE_PATH).download();
+      text = buf.toString('utf8');
+    } catch (e) {
+      if (/bucket does not exist|not found|404|No such object/i.test(e.message)) {
+        if (/bucket/i.test(e.message)) storageOk = false;
+      } else console.warn('Storage keshi o\'qilmadi:', e.message);
+    }
+  }
+  if (!text) {
+    const { getDb } = require('./firebase');
+    const meta = await getDb().collection('_cache').doc('catalog').get();
+    if (meta.exists && meta.data().parts) {
+      const parts = await Promise.all(Array.from({ length: meta.data().parts }, (_, i) =>
+        getDb().collection('_cache').doc(`catalog_${i}`).get()));
+      if (parts.every(p => p.exists)) text = parts.map(p => p.data().d).join('');
+    }
+  }
+  if (!text) return null;
+  const data = JSON.parse(text);
   if (!data?.ts || !data.docs) return null;
   return { ts: data.ts, full: data.full || data.ts, docs: revive(data.docs) };
 }
@@ -79,11 +105,22 @@ async function loadCache() {
 async function saveCache() {
   if (!dirty || !raw.size) return;
   dirty = false;
-  const docs = Object.fromEntries(raw);
+  const text = JSON.stringify({ ts: Date.now(), full: lastFullSync, docs: Object.fromEntries(raw) });
   try {
-    await bucket().file(CACHE_PATH).save(JSON.stringify({ ts: Date.now(), full: lastFullSync, docs }), {
-      resumable: false, contentType: 'application/json',
-    });
+    if (storageOk) {
+      try {
+        await bucket().file(CACHE_PATH).save(text, { resumable: false, contentType: 'application/json' });
+        return;
+      } catch (e) {
+        if (/bucket/i.test(e.message)) storageOk = false; else throw e;
+      }
+    }
+    const { getDb } = require('./firebase');
+    const n = Math.ceil(text.length / CHUNK);
+    for (let i = 0; i < n; i++) {
+      await getDb().collection('_cache').doc(`catalog_${i}`).set({ d: text.slice(i * CHUNK, (i + 1) * CHUNK) });
+    }
+    await getDb().collection('_cache').doc('catalog').set({ parts: n, ts: Date.now(), size: text.length });
   } catch (e) {
     dirty = true;
     console.warn('Katalog keshini saqlab bo\'lmadi:', e.message);
@@ -156,7 +193,7 @@ function startCatalog() {
   readyPromise = (async () => {
     let cache = null;
     try { cache = await loadCache(); } catch (e) {
-      if (!/No such object|404/i.test(e.message)) console.warn('Katalog keshi o\'qilmadi:', e.message);
+      console.warn('Katalog keshi o\'qilmadi:', e.message);
     }
 
     if (cache && Date.now() - cache.ts < CACHE_MAX_AGE) {
