@@ -206,6 +206,8 @@ const T = {
   available: { uz: 'Mavjud', uz_cyrl: 'Мавжуд', ru: 'В наличии', en: 'In stock' },
   menuPlaceholder: { uz: "Bo'limni tanlang…", uz_cyrl: 'Бўлимни танланг…', ru: 'Выберите раздел…', en: 'Choose a section…' },
   cartItemsCount: { uz: '{n} xil mahsulot · {q} dona', uz_cyrl: '{n} хил маҳсулот · {q} дона', ru: '{n} позиций · {q} шт', en: '{n} items · {q} pcs' },
+  orderCancelledKeepCart: { uz: "Buyurtma rasmiylashtirish to'xtatildi. Savatingiz saqlanib qoldi 🛒", uz_cyrl: 'Буюртма расмийлаштириш тўхтатилди. Саватингиз сақланиб қолди 🛒', ru: 'Оформление заказа отменено. Корзина сохранена 🛒', en: 'Checkout cancelled. Your cart is saved 🛒' },
+  actionCancelled: { uz: 'Bekor qilindi.', uz_cyrl: 'Бекор қилинди.', ru: 'Отменено.', en: 'Cancelled.' },
   btnSearch: { uz: '🔍 Qidirish', uz_cyrl: '🔍 Қидириш', ru: '🔍 Поиск', en: '🔍 Search' },
   catalogHeader: { uz: '🏗 *BoomStroy katalogi*', uz_cyrl: '🏗 *BoomStroy каталоги*', ru: '🏗 *Каталог BoomStroy*', en: '🏗 *BoomStroy catalog*' },
   catalogStats: { uz: "📦 {n} ta mahsulot · {c} ta bo'lim", uz_cyrl: '📦 {n} та маҳсулот · {c} та бўлим', ru: '📦 {n} товаров · {c} разделов', en: '📦 {n} products · {c} sections' },

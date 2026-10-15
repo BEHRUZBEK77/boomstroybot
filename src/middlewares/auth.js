@@ -44,6 +44,12 @@ async function authMiddleware(ctx, next) {
     return ctx.reply(t(lang, 'rateLimited'));
   }
 
+  // Savatni tiklash (bot qayta ishga tushgan bo'lsa) — 3 soniyadan ko'p kutmaymiz
+  await Promise.race([
+    require('../services/session').ensureCartLoaded(ctx.from.id),
+    new Promise(r => setTimeout(r, 3000)),
+  ]).catch(() => { });
+
   // Foydalanuvchini yuklash: til + bloklash holati
   try {
     // Firestore sekinlashsa butun bot qotib qolmasligi uchun 4 soniya chegarasi

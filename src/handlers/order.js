@@ -480,9 +480,12 @@ async function notifyAdmins(ctx, order, orderId, s) {
 async function handleCancelOrder(ctx) {
   const lang = langOf(ctx);
   if (ctx.callbackQuery) await ctx.answerCbQuery();
-  setSession(ctx.from.id, { step: null });
-  clearCart(ctx.from.id);
-  const msg = t(lang, 'orderCancelled');
+  // Savat SAQLANADI — "Bekor qilish" faqat joriy amalni (qidiruv, manzil, buyurtma
+  // rasmiylashtirish) to'xtatadi. Savatni tozalash uchun alohida "Tozalash" tugmasi bor.
+  const wasOrdering = ['waiting_location', 'waiting_text_address', 'waiting_payment', 'confirm_order', 'waiting_payment_photo'].includes(getSession(ctx.from.id).step)
+    || ctx.callbackQuery?.data === 'cancel_order';
+  setSession(ctx.from.id, { step: null, orderAddress: null, deliveryType: null, pickupWarehouseId: null });
+  const msg = wasOrdering && getCart(ctx.from.id).length ? t(lang, 'orderCancelledKeepCart') : t(lang, 'actionCancelled');
   if (ctx.callbackQuery) {
     try { await ctx.editMessageText(msg, mainMenu(lang)); } catch { await ctx.reply(msg, mainMenu(lang)); }
   } else {
