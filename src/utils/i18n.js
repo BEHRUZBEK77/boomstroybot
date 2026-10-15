@@ -95,6 +95,7 @@ const T = {
   },
 
   // ── ADMIN MENYU TUGMALARI ──
+  am_panel:      { uz: '💼 Boshqaruv paneli', uz_cyrl: '💼 Бошқарув панели', ru: '💼 Панель управления', en: '💼 Control panel' },
   am_dashboard:  { uz: '📊 Dashboard', uz_cyrl: '📊 Дашборд', ru: '📊 Панель', en: '📊 Dashboard' },
   am_products:   { uz: '📦 Mahsulotlar', uz_cyrl: '📦 Маҳсулотлар', ru: '📦 Товары', en: '📦 Products' },
   am_orders:     { uz: '📋 Buyurtmalar', uz_cyrl: '📋 Буюртмалар', ru: '📋 Заказы', en: '📋 Orders' },
@@ -666,6 +667,10 @@ function interpolate(str, vars = {}) {
 
 function t(lang, key, vars = {}) {
   const l = normalizeLang(lang);
+  // Admin paneldan o'zgartirilgan matn (services/config.js → settings/texts)
+  let override = null;
+  try { override = require('../services/config').textOverride(key, l); } catch { }
+  if (override) return interpolate(override, vars);
   const entry = T[key];
   if (!entry) return key; // kalit topilmasa o'zini qaytaradi
   const str = entry[l] || entry[DEFAULT_LANG] || entry.uz || key;

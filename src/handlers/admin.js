@@ -47,6 +47,7 @@ async function handleAdminDashboard(ctx) {
     `🕐 ${new Date().toLocaleString('uz-UZ')}`;
 
   const kb = Markup.inlineKeyboard([
+    [Markup.button.callback('💼 Boshqaruv paneli', 'ae:h')],
     [Markup.button.callback('📋 Kutilayotgan buyurtmalar', 'admin_pending_orders')],
     [Markup.button.callback('⚠️ Kam qolgan mahsulotlar', 'admin_low_stock')],
     [Markup.button.callback('📈 Statistika', 'admin_stats')],
@@ -70,11 +71,8 @@ async function handleAdminOrders(ctx, filter = 'all') {
   if (filter === 'pending') orders = allOrders.filter(o => ['pending', 'paid_pending'].includes(o.status));
   else if (filter === 'active') orders = allOrders.filter(o => !['delivered', 'cancelled'].includes(o.status));
 
-  if (!orders.length) {
-    const msg = '📋 Buyurtmalar yo\'q.';
-    if (ctx.callbackQuery) return ctx.editMessageText(msg, Markup.inlineKeyboard([[Markup.button.callback('🔙', 'admin_dashboard')]]));
-    return ctx.reply(msg, adminMainMenu());
-  }
+  // Bo'sh bo'lsa ham filtr tugmalari ko'rinib tursin
+  orders = [...orders].sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
 
   const filterBtns = Markup.inlineKeyboard([
     [
@@ -88,10 +86,11 @@ async function handleAdminOrders(ctx, filter = 'all') {
         `admin_order:${o.id}`
       )
     ]),
-    [Markup.button.callback('🔙 Dashboard', 'admin_dashboard')],
+    [Markup.button.callback('🔎 Raqam bo\'yicha qidirish', 'ao:q')],
+    [Markup.button.callback('🏠 Panel', 'ae:h')],
   ]);
 
-  const text = `📋 *Buyurtmalar* (${orders.length} ta)`;
+  const text = orders.length ? `📋 *Buyurtmalar* (${orders.length} ta)` : '📋 Bu bo\'limda buyurtmalar yo\'q.';
   if (ctx.callbackQuery) {
     try { return ctx.editMessageText(text, { parse_mode: 'Markdown', ...filterBtns }); } catch { }
   }

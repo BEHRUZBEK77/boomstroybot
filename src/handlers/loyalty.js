@@ -9,7 +9,7 @@ const { getSession, setSession } = require('../services/session');
 const {
   fmtNum, calcEarnedPoints, getLoyaltyTier, generateReferralCode,
   generatePromoCode, isPromoValid, starsBar, truncate, totalStock,
-  REFERRAL_BONUS_POINTS, REFERRAL_WELCOME_POINTS, LOYALTY_POINT_VALUE,
+  REFERRAL_BONUS_POINTS, REFERRAL_WELCOME_POINTS, pointValue,
 } = require('../utils/helpers');
 const {
   loyaltyMenu, favoritesNavButtons, ratingStarsKeyboard, languageButtons,
@@ -45,7 +45,7 @@ async function handleLoyaltyMenu(ctx) {
 
   const text = t(lang, 'loyaltyMenuTitle', {
     tierIcon: tier.icon, tier: t(lang, tier.key),
-    points: fmtNum(points), value: fmtNum(points * LOYALTY_POINT_VALUE),
+    points: fmtNum(points), value: fmtNum(points * pointValue()),
     spent: fmtNum(user.totalSpent || 0), next, som: t(lang, 'som'),
   });
 
@@ -61,7 +61,7 @@ async function handleLoyaltyBalance(ctx) {
   const user = await getTgUser(ctx.from.id);
   if (!user) return;
   const points = user.loyaltyPoints || 0;
-  const text = t(lang, 'pointsBalance', { points: fmtNum(points), value: fmtNum(points * LOYALTY_POINT_VALUE), som: t(lang, 'som') });
+  const text = t(lang, 'pointsBalance', { points: fmtNum(points), value: fmtNum(points * pointValue()), som: t(lang, 'som') });
   await ctx.editMessageText(text, { parse_mode: 'Markdown', ...backTo(lang, 'loyalty_menu') });
 }
 
@@ -82,7 +82,7 @@ async function redeemLoyaltyPoints(telegramId, pointsToUse) {
   const available = user.loyaltyPoints || 0;
   if (pointsToUse > available) return { success: false };
   await updateDoc('telegramUsers', user.id, { loyaltyPoints: admin.firestore.FieldValue.increment(-pointsToUse) });
-  return { success: true, discount: pointsToUse * LOYALTY_POINT_VALUE };
+  return { success: true, discount: pointsToUse * pointValue() };
 }
 
 async function handleDailyBonus(ctx) {
@@ -164,7 +164,7 @@ async function handleRewardDetail(ctx, rewardId) {
   const text = t(lang, 'rewardDetail', {
     name: reward.name,
     desc: reward.description ? `${reward.description}\n\n` : '',
-    cost: fmtNum(cost), value: fmtNum(cost * LOYALTY_POINT_VALUE),
+    cost: fmtNum(cost), value: fmtNum(cost * pointValue()),
     stock, points: fmtNum(points), status, som: t(lang, 'som'),
   });
 
@@ -676,7 +676,7 @@ async function handleOrderRatingSave(ctx, orderId, stars) {
 // ─── 14. FAQ ─────────────────────────────────────────────────────────────────
 async function handleFAQ(ctx) {
   const lang = langOf(ctx);
-  const SUPPORT_USERNAME = process.env.SUPPORT_USERNAME || '@boomstroy_support';
+  const SUPPORT_USERNAME = require('../services/config').get('supportUsername');
   await ctx.reply(t(lang, 'faq', { support: SUPPORT_USERNAME, som: t(lang, 'som') }), { parse_mode: 'Markdown', ...mainMenu(lang) });
 }
 

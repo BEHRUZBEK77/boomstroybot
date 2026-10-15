@@ -1,11 +1,11 @@
 const { getSession, setSession } = require('../services/session');
 const { queryDocs, addDoc, updateDoc } = require('../services/firebase');
 const { mainMenu, sharePhoneButton, adminMainMenu } = require('../utils/keyboards');
-const { t, langOf, normalizeLang, SITE_URL } = require('../utils/i18n');
+const { t, langOf, normalizeLang } = require('../utils/i18n');
+const cfg = require('../services/config');
 const { Markup } = require('telegraf');
 
 const ADMIN_IDS = (process.env.ADMIN_TELEGRAM_ID || '').split(',').map(s => s.trim()).filter(Boolean);
-const SUPPORT_PHONE = process.env.SUPPORT_PHONE || '+998 94 217 10 10';
 
 function defaultUserShape(ctx, extra = {}) {
   const tgId = String(ctx.from.id);
@@ -124,7 +124,7 @@ async function showWelcome(ctx, user) {
   const lang = normalizeLang(user.lang || ctx.state.lang);
   ctx.state.lang = lang;
   await ctx.reply(
-    t(lang, 'welcome', { name: user.firstName, phone: SUPPORT_PHONE, site: SITE_URL }),
+    t(lang, 'welcome', { name: user.firstName, phone: cfg.get('supportPhone'), site: cfg.get('siteUrl') }),
     { parse_mode: 'Markdown', ...mainMenu(lang) }
   );
 }
@@ -132,7 +132,7 @@ async function showWelcome(ctx, user) {
 async function handleHelp(ctx) {
   const lang = langOf(ctx);
   await ctx.reply(
-    t(lang, 'help', { phone: SUPPORT_PHONE, site: SITE_URL }),
+    t(lang, 'help', { phone: cfg.get('supportPhone'), site: cfg.get('siteUrl') }),
     { parse_mode: 'Markdown', ...mainMenu(lang) }
   );
 }

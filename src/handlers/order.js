@@ -11,8 +11,6 @@ const { buildCartSummary } = require('./cart');
 
 const ADMIN_IDS = (process.env.ADMIN_TELEGRAM_ID || '').split(',').map(s => s.trim()).filter(Boolean);
 const ADMIN_GROUP = process.env.ADMIN_GROUP_ID;
-const CARD_NUMBER = process.env.CARD_NUMBER || '8600000000000000';
-const CARD_OWNER = process.env.CARD_OWNER || 'BoomStroy LLC';
 
 function payLabel(lang, payType, isPickup) {
   if (payType === 'card') return t(lang, 'payCard');
@@ -229,7 +227,7 @@ async function handlePaymentChoice(ctx, payType) {
   const grandTotal = total + (s.deliveryFee || 0);
 
   if (payType === 'card') {
-    const text = t(lang, 'payCardText', { card: CARD_NUMBER, owner: CARD_OWNER, grand: fmtNum(grandTotal), som: t(lang, 'som') });
+    const text = t(lang, 'payCardText', { card: require('../services/config').get('cardNumber'), owner: require('../services/config').get('cardOwner'), grand: fmtNum(grandTotal), som: t(lang, 'som') });
     await ctx.editMessageText(text, {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard([[Markup.button.callback(t(lang, 'cancel'), 'cancel_order')]]),
@@ -305,7 +303,7 @@ async function handleOrderConfirm(ctx) {
   const promoDiscount = promo ? calcPromoDiscount(promo, total) : 0;
 
   const pointsToRedeem = Math.min(s.redeemPoints || 0, user.loyaltyPoints || 0);
-  const pointsDiscount = pointsToRedeem * require('../utils/helpers').LOYALTY_POINT_VALUE;
+  const pointsDiscount = pointsToRedeem * require('../utils/helpers').pointValue();
 
   const grandTotal = Math.max(0, total + deliveryFee - promoDiscount - pointsDiscount);
   const orderNum = generateOrderNumber();

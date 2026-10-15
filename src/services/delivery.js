@@ -9,9 +9,8 @@ const WAREHOUSE = {
   phone: process.env.WAREHOUSE_PHONE || '',
 };
 
-const BASE_FEE = parseInt(process.env.BASE_DELIVERY_FEE || '10000');
-const PER_KM = parseInt(process.env.DELIVERY_PER_KM || '2000');
-const MAX_KM = parseInt(process.env.MAX_DELIVERY_KM || '50');
+// Admin paneldan o'zgartiriladi (services/config.js)
+const cfgNum = (k) => Number(require('./config').get(k)) || 0;
 
 // Taqiqlangan hududlar - Bo'ka tumani va boshqalar
 const RESTRICTED_KEYWORDS = [
@@ -111,15 +110,15 @@ function isRestrictedZone(addressInfo) {
  * Buyurtmalar soniga qarab avtomatik ko'payadi
  */
 function calcDeliveryFee(distanceKm, orderCount = 1) {
-  if (distanceKm > MAX_KM) {
+  if (distanceKm > cfgNum('maxDeliveryKm')) {
     return {
       success: false,
-      error: `Yetkazib berish ${MAX_KM} km gacha. Sizning manzilingiz ${distanceKm.toFixed(1)} km uzoqda.`,
+      error: `Yetkazib berish ${cfgNum('maxDeliveryKm')} km gacha. Sizning manzilingiz ${distanceKm.toFixed(1)} km uzoqda.`,
     };
   }
 
-  const baseFee = BASE_FEE;
-  const distanceFee = Math.round(distanceKm * PER_KM);
+  const baseFee = cfgNum('baseDeliveryFee');
+  const distanceFee = Math.round(distanceKm * cfgNum('deliveryPerKm'));
 
   // Buyurtmalar soniga qarab chegirma/oshirish
   let multiplier = 1;
@@ -136,7 +135,7 @@ function calcDeliveryFee(distanceKm, orderCount = 1) {
     distanceFee,
     multiplier,
     total,
-    breakdown: `${fmtNum(baseFee)} + ${fmtNum(distanceFee)} (${distanceKm.toFixed(1)} km × ${fmtNum(PER_KM)})`,
+    breakdown: `${fmtNum(baseFee)} + ${fmtNum(distanceFee)} (${distanceKm.toFixed(1)} km × ${fmtNum(cfgNum('deliveryPerKm'))})`,
     discountPercent: multiplier < 1 ? Math.round((1 - multiplier) * 100) : 0,
     orderCount,
   };
@@ -158,7 +157,7 @@ async function checkDelivery(lat, lng, orderCount = 1, lang = 'uz') {
       restricted: true,
       reason: restriction.reason,
       address: geoInfo.display,
-      message: t(lang, 'deliveryRestricted', { zone: escapeMd(restriction.reason), maxkm: MAX_KM }),
+      message: t(lang, 'deliveryRestricted', { zone: escapeMd(restriction.reason), maxkm: cfgNum('maxDeliveryKm') }),
     };
   }
 
@@ -175,7 +174,7 @@ async function checkDelivery(lat, lng, orderCount = 1, lang = 'uz') {
       address: geoInfo.display,
       distance: parseFloat(distance.toFixed(2)),
       message: t(lang, 'deliveryTooFar', {
-        maxkm: MAX_KM, dist: distance.toFixed(1),
+        maxkm: cfgNum('maxDeliveryKm'), dist: distance.toFixed(1),
         city: escapeMd(geoInfo.city || geoInfo.district), wh: escapeMd(WAREHOUSE.name),
       }),
     };
@@ -215,8 +214,8 @@ module.exports = {
   calcDeliveryFee,
   escapeMd,
   WAREHOUSE,
-  BASE_FEE,
-  PER_KM,
-  MAX_KM,
+  get BASE_FEE() { return cfgNum('baseDeliveryFee'); },
+  get PER_KM() { return cfgNum('deliveryPerKm'); },
+  get MAX_KM() { return cfgNum('maxDeliveryKm'); },
   RESTRICTED_KEYWORDS,
 };

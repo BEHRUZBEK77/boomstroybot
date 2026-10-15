@@ -197,3 +197,24 @@ Bazada `currency: "USD"` bo'lgan mahsulotlar Markaziy bank (cbu.uz) kursi bo'yic
 
 `stock` bo'sh (`{}`) bo'lgan mahsulotlar "Sotuvda" deb ko'rsatiladi (zaxira yuritilmaydi).
 Ombor bo'yicha miqdor kiritilsa — bot uni hisobga oladi va tugaganda mahsulotni yashiradi.
+
+---
+
+## 💼 Admin panel (Telegram ichida)
+
+`/admin` yoki **💼 Boshqaruv paneli** tugmasi. Faqat `ADMIN_TELEGRAM_ID` dagi akkauntlar uchun.
+
+| Bo'lim | Imkoniyatlar |
+|---|---|
+| 🛍 Mahsulotlar | qo'shish (bosqichma-bosqich), har bir maydonni tahrirlash, rasm yuklash, sotuvdan olish, o'chirish, qidirish |
+| 📁 Bo'limlar | qo'shish, nom/belgi/rasm, botda yashirish, o'chirish (ichida mahsulot bo'lmasa) |
+| 📝 Buyurtmalar | ro'yxat, raqam bo'yicha qidirish, istalgan holatga o'tkazish (mijozga avtomatik xabar) |
+| 🪪 Mijozlar | qidirish, bloklash, ball qo'shish/ayirish, shaxsiy xabar, buyurtmalari |
+| 🎟 Promo-kodlar | foiz yoki summa, limit, muddat |
+| 💎 Sovg'alar | ball evaziga sovg'alar |
+| 📣 E'lonlar | saqlangan zahoti barcha mijozlarga yuboriladi |
+| 🏛 Omborlar | olib ketish manzillari, xaritadagi joyi |
+| 💻 Sozlamalar | telefon, karta, yetkazish narxlari, dollar kursi, bonus tizimi, bot matnlari (4 tilda) |
+
+Sozlamalar Firestore `settings/config` va `settings/texts` da saqlanadi va darhol kuchga kiradi.
+Railway Variables endi faqat standart qiymat sifatida ishlatiladi.

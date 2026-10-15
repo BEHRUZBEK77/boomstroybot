@@ -2,7 +2,6 @@ const { queryDocs } = require('../services/firebase');
 const { t, normalizeLang } = require('../utils/i18n');
 
 const ADMIN_IDS = (process.env.ADMIN_TELEGRAM_ID || '').split(',').map(s => s.trim()).filter(Boolean);
-const SUPPORT_USERNAME = process.env.SUPPORT_USERNAME || '@boomstroy_support';
 
 // Til keshi — har bir xabarda Firestore o'qimaslik uchun (5 daqiqa TTL)
 const langCache = new Map();
@@ -56,7 +55,7 @@ async function authMiddleware(ctx, next) {
         cacheLang(userId, lang);
       }
       if (user.isBlocked) {
-        return ctx.reply(t(lang, 'blocked', { support: SUPPORT_USERNAME }));
+        return ctx.reply(t(lang, 'blocked', { support: require('../services/config').get('supportUsername') }));
       }
     }
   } catch (e) {

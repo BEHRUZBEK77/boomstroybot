@@ -9,9 +9,11 @@
 // ════════════════════════════════════════════════════════════════════════════
 const axios = require('axios');
 
-let rate = Number(process.env.USD_RATE) || null;
-let source = rate ? 'env' : null;
-let updatedAt = rate ? new Date() : null;
+let rate = null;
+let source = null;
+let updatedAt = null;
+const cfg = () => require('./config');
+const manualRate = () => Number(cfg().get('usdRate')) || 0;
 const listeners = new Set();
 
 function getUsdRate() { return rate; }
@@ -32,12 +34,12 @@ async function fetchCbuRate() {
   const { data } = await axios.get('https://cbu.uz/uz/arkhiv-kursov-valyut/json/USD/', { timeout: 10000 });
   const r = parseFloat(String(data?.[0]?.Rate || '').replace(',', '.'));
   if (!r) throw new Error('CBU javobida kurs yo\'q');
-  const markup = Number(process.env.USD_RATE_MARKUP) || 0;
+  const markup = Number(cfg().get('usdRateMarkup')) || 0;
   return r * (1 + markup / 100);
 }
 
 async function refreshRate() {
-  if (process.env.USD_RATE) return; // qo'lda belgilangan
+  if (manualRate() > 0) { setRate(manualRate(), 'qo\'lda (admin)'); return; }
   const { getDb } = require('./firebase');
   try {
     const r = await fetchCbuRate();
@@ -57,6 +59,8 @@ async function refreshRate() {
 }
 
 async function startCurrency() {
+  // Admin kurs yoki ustamani o'zgartirsa — darhol qayta hisoblaymiz
+  cfg().onChange((k) => { if (k === 'usdRate' || k === 'usdRateMarkup') refreshRate(); });
   await refreshRate();
   if (!rate) {
     // Hech qanday kurs yo'q — xavfsiz zaxira qiymat, logda ogohlantiramiz

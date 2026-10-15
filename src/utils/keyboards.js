@@ -17,6 +17,7 @@ const mainMenu = (lang = 'uz') => Markup.keyboard([
 const mainMenuV2 = mainMenu;
 
 const adminMainMenu = (lang = 'uz') => Markup.keyboard([
+  [t(lang, 'am_panel')],
   [t(lang, 'am_dashboard'), t(lang, 'am_products')],
   [t(lang, 'am_orders'), t(lang, 'am_customers')],
   [t(lang, 'am_warehouses'), t(lang, 'am_stats')],
@@ -26,7 +27,7 @@ const adminMainMenu = (lang = 'uz') => Markup.keyboard([
 
 // ─── VEB-SAYT ────────────────────────────────────────────────────────────────
 const websiteButton = (lang = 'uz') => Markup.inlineKeyboard([
-  [Markup.button.url(t(lang, 'websiteBtn'), SITE_URL)],
+  [Markup.button.url(t(lang, 'websiteBtn'), require('../services/config').get('siteUrl'))],
 ]);
 
 // ─── MAHSULOT TUGMALARI ──────────────────────────────────────────────────────
@@ -137,6 +138,7 @@ const orderStatusActions = (orderId, status) => {
     btns.push([Markup.button.callback("✅ To'lovni tasdiqlash", `admin_pay_ok:${orderId}`)]);
     btns.push([Markup.button.callback("❌ To'lovni rad etish", `admin_pay_fail:${orderId}`)]);
   }
+  btns.push([Markup.button.callback('🔄 Holatni o\'zgartirish', `ao:sm:${orderId}`)]);
   btns.push([Markup.button.callback('👁️ Batafsil', `admin_view_order:${orderId}`)]);
   return Markup.inlineKeyboard(btns);
 };

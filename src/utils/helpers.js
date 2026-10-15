@@ -150,8 +150,12 @@ const REFERRAL_BONUS_POINTS = parseInt(process.env.REFERRAL_BONUS_POINTS || '500
 // Referal qabul qilgan (yangi) kishiga necha ball beriladi (200 ball = 2 000 so'm)
 const REFERRAL_WELCOME_POINTS = parseInt(process.env.REFERRAL_WELCOME_POINTS || '200');
 
+// Admin paneldan o'zgartiriladigan qiymatlar (services/config.js)
+const pointValue = () => Number(require('../services/config').get('loyaltyPointValue')) || 10;
+const earnRate = () => Number(require('../services/config').get('loyaltyEarnRate')) || 0;
+
 function calcEarnedPoints(orderTotal) {
-  return Math.floor((orderTotal || 0) * LOYALTY_EARN_RATE);
+  return Math.floor((orderTotal || 0) * earnRate());
 }
 
 // Tier obyektida `key` — i18n nomi (tier_new, tier_bronze, ...), `nextKey` — keyingi daraja kaliti
@@ -217,7 +221,7 @@ module.exports = {
   fmtNum, fmtDate, fmtDateShort, timeAgo,
   getStockStatus, totalStock, isStockTracked, maxOrderQty, deductStock, addStock, paymentLabel, orderStatusLabel,
   escapeMarkdown, mdBold, chunk, generateOrderNumber, parseCoords,
-  LOYALTY_EARN_RATE, LOYALTY_POINT_VALUE, REFERRAL_BONUS_POINTS, REFERRAL_WELCOME_POINTS,
+  LOYALTY_EARN_RATE, LOYALTY_POINT_VALUE, pointValue, earnRate, REFERRAL_BONUS_POINTS, REFERRAL_WELCOME_POINTS,
   calcEarnedPoints, getLoyaltyTier, generateReferralCode, generatePromoCode,
   isPromoValid, calcPromoDiscount, maskCardNumber, starsBar, pluralUnit, truncate,
 };

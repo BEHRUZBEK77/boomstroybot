@@ -2,13 +2,11 @@ const { queryDocs, updateDoc } = require('../services/firebase');
 const { getSession, setSession } = require('../services/session');
 const { fmtNum, fmtDate, escapeMarkdown } = require('../utils/helpers');
 const { mainMenu, sharePhoneButton, sendLocationButton } = require('../utils/keyboards');
-const { t, langOf, SITE_URL } = require('../utils/i18n');
+const { t, langOf } = require('../utils/i18n');
+const cfg = require('../services/config');
 const { Markup } = require('telegraf');
-const { checkDelivery, WAREHOUSE, BASE_FEE, PER_KM, MAX_KM } = require('../services/delivery');
+const { checkDelivery, WAREHOUSE } = require('../services/delivery');
 
-const SUPPORT_PHONE = process.env.SUPPORT_PHONE || '+998 94 217 10 10';
-const SUPPORT_USERNAME = process.env.SUPPORT_USERNAME || '@boomstroy_support';
-const EMAIL = process.env.SUPPORT_EMAIL || 'info@boomstroy.uz';
 const BOT_USERNAME = '@' + (process.env.BOT_USERNAME || 'BoomStroyBot').replace('@', '');
 
 async function handleProfile(ctx) {
@@ -69,11 +67,11 @@ async function handleDeliveryInfo(ctx) {
   const lang = langOf(ctx);
   const text = t(lang, 'deliveryInfo', {
     wh: WAREHOUSE.name,
-    base: fmtNum(BASE_FEE),
-    perkm: fmtNum(PER_KM),
-    maxkm: MAX_KM,
+    base: fmtNum(cfg.get('baseDeliveryFee')),
+    perkm: fmtNum(cfg.get('deliveryPerKm')),
+    maxkm: cfg.get('maxDeliveryKm'),
     som: t(lang, 'som'),
-    support: SUPPORT_USERNAME,
+    support: cfg.get('supportUsername'),
   });
   const kb = Markup.inlineKeyboard([
     [Markup.button.callback(t(lang, 'btnCheckMyAddress'), 'check_my_location')],
@@ -120,10 +118,10 @@ async function handleLocationCheckOnlyAlias(ctx) { return handleLocationCheckOnl
 async function handleContact(ctx) {
   const lang = langOf(ctx);
   const text = t(lang, 'contactInfo', {
-    phone: SUPPORT_PHONE,
-    support: SUPPORT_USERNAME,
-    email: EMAIL,
-    site: SITE_URL,
+    phone: cfg.get('supportPhone'),
+    support: cfg.get('supportUsername'),
+    email: cfg.get('supportEmail'),
+    site: cfg.get('siteUrl'),
     wh: WAREHOUSE.name,
   });
   await ctx.reply(text, { parse_mode: 'Markdown', disable_web_page_preview: true, ...mainMenu(lang) });
@@ -131,7 +129,7 @@ async function handleContact(ctx) {
 
 async function handleAbout(ctx) {
   const lang = langOf(ctx);
-  const text = t(lang, 'aboutInfo', { site: SITE_URL, bot: BOT_USERNAME });
+  const text = t(lang, 'aboutInfo', { site: cfg.get('siteUrl'), bot: BOT_USERNAME });
   await ctx.reply(text, { parse_mode: 'Markdown', disable_web_page_preview: true, ...mainMenu(lang) });
 }
 

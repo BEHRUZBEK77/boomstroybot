@@ -141,13 +141,41 @@ bot.use((ctx, next) => {
 });
 bot.use(authMiddleware);
 
+// ── ADMIN PANEL: kiritish bosqichlari ─────────────────────────────────────────
+// Admin panelda qiymat kiritilayotganda xabar (matn, rasm, joylashuv, video)
+// to'g'ridan-to'g'ri panelga yo'naltiriladi — menyu tugmalari bilan aralashmaydi.
+const adminPanel = require('./admin/panel');
+const adminCustomers = require('./admin/customers');
+const adminSettings = require('./admin/settings');
+const ADMIN_INPUT_STEPS = {
+  ae: adminPanel.handleInput, ae_search: adminPanel.handleInput, ae_broadcast: adminPanel.handleInput,
+  ac_input: adminCustomers.handleInput, as_input: adminSettings.handleInput,
+};
+bot.use(async (ctx, next) => {
+  if (!ctx.state.isAdmin || !ctx.message || !ctx.from) return next();
+  const s = getSession(ctx.from.id);
+  const handler = ADMIN_INPUT_STEPS[s.step];
+  if (!handler) return next();
+  const txt = ctx.message.text;
+  if (txt && (txt.startsWith('/') || variantsOf('cancel').includes(txt))) {
+    setSession(ctx.from.id, { step: null, ae: null, acInput: null, asInput: null });
+    if (txt.startsWith('/')) return next();
+    await ctx.reply('Bekor qilindi.');
+    return adminPanel.showHub(ctx);
+  }
+  return handler(ctx);
+});
+
 // ── COMMANDS ──────────────────────────────────────────────────────────────────
 bot.start(handleStart);
 bot.help(handleHelp);
-bot.command('admin', (ctx) => {
-  if (isAdmin(ctx)) handleAdminDashboard(ctx);
-  else ctx.reply(t(langOf(ctx), 'noAccess'));
+bot.command('admin', async (ctx) => {
+  if (!isAdmin(ctx)) return ctx.reply(t(langOf(ctx), 'noAccess'));
+  const { adminMainMenu } = require('./utils/keyboards');
+  await ctx.reply('💼', adminMainMenu(langOf(ctx)));
+  return adminPanel.showHub(ctx);
 });
+bot.command('panel', (ctx) => isAdmin(ctx) ? adminPanel.showHub(ctx) : ctx.reply(t(langOf(ctx), 'noAccess')));
 bot.command('cancel', handleCancelOrder);
 // Premium emoji va stikerlar (faqat admin)
 const premiumAdmin = require('./handlers/premiumAdmin');
@@ -184,21 +212,15 @@ bot.hears(variantsOf('cancel'), handleCancelOrder);
 
 // ── ADMIN MENYUSI ─────────────────────────────────────────────────────────────
 bot.hears(variantsOf('am_dashboard'), handleAdminDashboard);
-bot.hears(variantsOf('am_products'), handleAdminProducts);
+const adminOnly = (fn) => (ctx) => isAdmin(ctx) ? fn(ctx) : undefined;
+bot.hears(variantsOf('am_panel'), adminOnly((ctx) => adminPanel.showHub(ctx)));
+bot.hears(variantsOf('am_products'), adminOnly((ctx) => adminPanel.handleCallback(ctx, 'ae:l:p:0')));
 bot.hears(variantsOf('am_orders'), (ctx) => handleAdminOrders(ctx, 'all'));
-bot.hears(variantsOf('am_customers'), handleAdminCustomers);
-bot.hears(variantsOf('am_warehouses'), handleAdminWarehouses);
+bot.hears(variantsOf('am_customers'), adminOnly((ctx) => adminCustomers.showList(ctx, 0)));
+bot.hears(variantsOf('am_warehouses'), adminOnly((ctx) => adminPanel.handleCallback(ctx, 'ae:l:w:0')));
 bot.hears(variantsOf('am_stats'), handleAdminStats);
-bot.hears(variantsOf('am_broadcast'), handleAdminBroadcast);
-bot.hears(variantsOf('am_settings'), async (ctx) => {
-  if (!isAdmin(ctx)) return;
-  const { Markup } = require('telegraf');
-  const panel = process.env.ADMIN_PANEL_URL || SITE_URL;
-  ctx.reply(
-    `⚙️ *Sozlamalar*\n\nAdmin panelni veb-sayt orqali boshqaring:\n🌐 ${panel}`,
-    { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.url('🌐 Saytga o\'tish', panel)]]) }
-  );
-});
+bot.hears(variantsOf('am_broadcast'), adminOnly((ctx) => adminPanel.handleCallback(ctx, 'ae:bc')));
+bot.hears(variantsOf('am_settings'), adminOnly((ctx) => adminSettings.showHome(ctx)));
 bot.hears(variantsOf('am_userMenu'), async (ctx) => {
   const { mainMenu } = require('./utils/keyboards');
   ctx.reply(t(langOf(ctx), 'mainMenuTitle'), mainMenu(langOf(ctx)));
@@ -261,6 +283,11 @@ bot.on('callback_query', async (ctx) => {
 
   try {
     const lang = langOf(ctx);
+
+    // Admin panel
+    if (data.startsWith('ae:')) return adminPanel.handleCallback(ctx, data);
+    if (data.startsWith('ac:') || data.startsWith('ao:')) return adminCustomers.handleCallback(ctx, data);
+    if (data.startsWith('as:')) return adminSettings.handleCallback(ctx, data);
 
     // Categories
     if (data === 'categories') return handleCatalog(ctx);
@@ -547,6 +574,8 @@ async function ensureWebhook(reason = 'check') {
 
 async function startBot() {
   // Valyuta kursi va mahsulotlar katalogi (xotirada) — update'lar kelishidan oldin
+  require('./services/config').startConfig();
+  await sleep(1500); // sozlamalar yuklanishi uchun
   await require('./services/currency').startCurrency();
   await require('./utils/premium').loadPremium();
   await Promise.race([require('./services/catalog').startCatalog(), sleep(20000)]);
